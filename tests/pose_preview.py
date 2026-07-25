@@ -48,11 +48,11 @@ def main() -> int:
     ap.add_argument("input", type=Path, help="リグ済み GLB")
     ap.add_argument("--output", type=Path, required=True)
     ap.add_argument("--pose", choices=sorted(POSES), default="relaxed")
-    ap.add_argument("--view", choices=("front", "side"), default="front")
+    ap.add_argument("--view", choices=("front", "back", "side"), default="front")
     args = ap.parse_args()
 
     import bpy
-    from mathutils import Quaternion
+    from mathutils import Quaternion, Vector
 
     bpy.ops.wm.read_factory_settings(use_empty=True)
     bpy.ops.import_scene.gltf(filepath=str(args.input))
@@ -96,16 +96,23 @@ def main() -> int:
     if args.view == "front":
         cam.location = (0.0, -height * 3, height / 2)
         cam.rotation_euler = (math.pi / 2, 0.0, 0.0)
+    elif args.view == "back":
+        cam.location = (0.0, height * 3, height / 2)
+        cam.rotation_euler = (math.pi / 2, 0.0, math.pi)
     else:
         cam.location = (height * 3, 0.0, height / 2)
         cam.rotation_euler = (math.pi / 2, 0.0, math.pi / 2)
     scene.camera = cam
 
+    # ライトは必ずカメラ側に置く。正面固定にすると背面ビューが真っ黒になり、
+    # モデルの色が暗いのか陰になっているだけなのか区別できなくなる。
     sun_data = bpy.data.lights.new("Sun", type="SUN")
     sun_data.energy = 4.0
     sun = bpy.data.objects.new("Sun", sun_data)
-    sun.rotation_euler = (math.radians(60), 0.0, math.radians(-30))
     scene.collection.objects.link(sun)
+    sun.location = cam.location + Vector((0.0, 0.0, height * 0.8))
+    direction = Vector((0.0, 0.0, height / 2)) - sun.location
+    sun.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
 
     scene.render.engine = "CYCLES"
     scene.cycles.device = "CPU"
