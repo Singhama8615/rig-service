@@ -31,6 +31,11 @@ uv venv --python 3.11 .venv-rig
 uv pip install --python .venv-rig/bin/python -r requirements.txt
 ```
 
+> venv をディレクトリごと移動した場合、`.venv-rig/bin/` のコンソールスクリプトは
+> shebang に旧パスが残って壊れる。`./run.sh` と `python -m pytest` は
+> `python -m` 経由なので影響を受けないが、`bin/uvicorn` 等を直接叩くなら
+> 作り直すか shebang を書き換える。
+
 システム Blender は不要(`bpy` モジュールで完結する)。
 `bpy` が導入できない環境では Blender 4.5 LTS を入れて
 `RIGSVC_ENGINE=blender_cli` を指定すれば同じスクリプトで動作する。
