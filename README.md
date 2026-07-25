@@ -231,11 +231,31 @@ GODOT_BIN=~/3D-world/bin/godot godot_check/run_check.sh rigged.glb
 `?motion=` 付きでダウンロードしたGLBを渡すと、Godot でアニメーションが
 再生できるか(`AnimationPlayer` に載り、ボーンが動くか)も併せて検証する。
 
-## ライセンス上の注意
+## ライセンス
 
-`bpy`(Blender)は GPL。本サービスは Blender を**独立プロセス**として呼ぶため
-image-3d 本体へのライセンス波及は無いが、rig-service 自体の配布形態には注意する
-(計画書 §8)。
+このリポジトリのオリジナルコード(`server/`・`web/`(vendor除く)・`docs/`・
+`tests/`・`godot_check/` 等)は [Polyform Small Business License 1.0.0](LICENSE)
+の下で提供されます(image-3d と同じライセンス)。
 
-`web/vendor/three/`(Three.js r160)は MIT。image-3d が同梱していたものを
-コピーして持ち込んでおり、本リポジトリだけで自己完結している。
+要約(法的拘束力があるのは [LICENSE](LICENSE) 本文のみです):
+
+- **非商用利用**は誰でも自由に可能。
+- **商用利用**も、従業員・業務委託者を合わせて100人未満かつ直近課税年度の
+  総収益が100万USD未満の「小規模事業者」であれば許可されます。
+
+### 同梱している第三者コード
+
+| 対象 | ライセンス |
+|---|---|
+| Three.js r160 (`web/vendor/three/`) | MIT(各ファイル先頭に原著作権表示あり) |
+
+### リポジトリに含まれない依存
+
+**`bpy`(Blender)は GPL** ですが、本リポジトリには含まれません
+(`.venv-rig/` は `.gitignore` 対象で、利用者が `pip install` で導入します)。
+本サービスは Blender を **独立したサブプロセス**として起動するだけで、
+GPLコードを自身のプロセスにリンクしません(計画書 §8)。
+
+なお VRM 1.0 出力・ポーズ適用・モーションクリップは Blender を一切使わない
+純Python実装です(`server/vrm.py` / `pose.py` / `motions.py`)。
+リグ処理以外は bpy 無しで動きます。
