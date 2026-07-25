@@ -1,0 +1,21 @@
+; rig-service のリグ済みGLBを Godot 4 で検証するための最小プロジェクト
+; (計画書 §7 Phase R1-4)。
+;
+; 実行方法は ../README.md「Godot でのインポート検証」を参照。
+
+config_version=5
+
+[application]
+
+config/name="rig-service Godot import check"
+run/main_scene="res://verify_rig.tscn"
+config/features=PackedStringArray("4.4", "Forward Plus")
+
+[display]
+
+window/size/viewport_width=512
+window/size/viewport_height=640
+
+[rendering]
+
+anti_aliasing/quality/msaa_3d=2

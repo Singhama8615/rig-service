@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rig-service — 3Dモデル自動リグ</title>
+<script type="importmap">
+{
+  "imports": {
+    "three": "/vendor/three/build/three.module.js",
+    "three/addons/": "/vendor/three/examples/jsm/"
+  }
+}
+</script>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, "Noto Sans JP", sans-serif; margin: 0 auto; max-width: 64rem;
+         padding: 1.5rem; line-height: 1.6; }
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.1rem; margin-bottom: .4rem; }
+  .note { background: rgba(127,127,127,.12); border-left: 3px solid #888;
+          padding: .6rem .9rem; border-radius: .2rem; }
+  form { display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; margin: 1rem 0; }
+  label { display: flex; gap: .4rem; align-items: center; }
+  input[type=number] { width: 5rem; }
+  button { padding: .4rem 1rem; cursor: pointer; }
+  .job { border: 1px solid rgba(127,127,127,.4); border-radius: .4rem;
+         padding: .8rem; margin-bottom: .8rem; display: flex; gap: 1rem; }
+  .job img { width: 120px; height: 160px; object-fit: contain;
+             background: rgba(127,127,127,.1); border-radius: .2rem; }
+  .job-body { flex: 1; min-width: 0; }
+  .status { font-weight: 600; }
+  .status.completed { color: #2a8; }
+  .status.failed { color: #d44; }
+  .warn { color: #c80; font-size: .9rem; }
+  .err { color: #d44; font-size: .9rem; }
+  dl { display: grid; grid-template-columns: auto 1fr; gap: 0 .8rem; margin: .4rem 0;
+       font-size: .9rem; }
+  dt { color: #888; }
+  dd { margin: 0; }
+
+  /* --- 3Dプレビュー --- */
+  #preview { margin: 1.2rem 0; }
+  #preview[hidden] { display: none; }
+  #viewer-canvas { width: 100%; height: 26rem; display: block; border-radius: .4rem;
+                   background: #2a2d33; }
+  .viewer-controls { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap;
+                     margin-top: .6rem; }
+  .viewer-controls .spacer { flex: 1; }
+  .bone-controls { display: flex; gap: .8rem; align-items: center; flex-wrap: wrap;
+                   margin-top: .6rem; font-size: .9rem; }
+  .bone-controls input[type=range] { width: 8rem; }
+  .axis { display: flex; gap: .3rem; align-items: center; }
+  .axis output { width: 2.6rem; text-align: right; color: #888; font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<h1>rig-service — 3Dモデル自動リグ</h1>
+<p id="focus-note" hidden>
+  image-3d から送られたジョブを表示しています。
+  <a href="/">すべてのジョブを見る</a>
+</p>
+
+<p class="note">
+  <strong>Tポーズの立ち絵から生成したモデル</strong>を入力してください。
+  腕を水平に広げていないモデルは関節位置を推定できず、リグの精度が大きく落ちます。<br>
+  出力は glTF 仕様準拠(Y-up・原点=足元・メートル系)のスキン付き GLB と VRM 1.0 です。
+  Godot 4 はそのままインポートでき、<code>SkeletonProfileHumanoid</code> の
+  BoneMap でリターゲットできます。
+</p>
+
+<form id="form">
+  <input type="file" id="model" accept=".glb,model/gltf-binary" required>
+  <label>全高 <input type="number" id="height" value="1.6" min="0.05" max="100" step="0.1"> m</label>
+  <label>上方向
+    <select id="upAxis">
+      <option value="auto">自動判定</option>
+      <option value="z">Z-up (image-3d)</option>
+      <option value="y">Y-up (glTF仕様)</option>
+    </select>
+  </label>
+  <label>正面
+    <select id="facing">
+      <option value="auto">自動判定</option>
+      <option value="-y">-Y</option>
+      <option value="+y">+Y</option>
+    </select>
+  </label>
+  <button type="submit">リグ化</button>
+</form>
+
+<section id="preview" hidden>
+  <h2>プレビュー <span id="preview-name" style="font-weight:400;color:#888"></span></h2>
+  <canvas id="viewer-canvas"></canvas>
+  <div class="viewer-controls">
+    <label>モーション
+      <select id="motion-select">
+        <option value="">(なし)</option>
+      </select>
+    </label>
+    <button type="button" id="motion-play" disabled>再生</button>
+    <input type="range" id="motion-seek" min="0" max="1" step="0.001" value="0" disabled>
+    <output id="motion-time">0.00s</output>
+    <span class="spacer"></span>
+    <button type="button" id="download-motion" disabled>アニメ入りGLBを保存</button>
+  </div>
+  <div class="viewer-controls">
+    <label><input type="checkbox" id="show-bones"> ボーン表示</label>
+    <label>ポーズ
+      <select id="pose-preset">
+        <option value="tpose">Tポーズ(レスト)</option>
+        <option value="arms_down">腕を下ろす</option>
+        <option value="relaxed">リラックス</option>
+        <option value="wave">手を振る</option>
+      </select>
+    </label>
+    <span class="spacer"></span>
+    <button type="button" id="download-posed">ポーズ済みGLBを保存</button>
+  </div>
+  <div class="bone-controls">
+    <label>ボーン
+      <select id="bone-select"></select>
+    </label>
+    <span class="axis">X <input type="range" id="rot-x" min="-180" max="180" value="0"><output id="out-x">0°</output></span>
+    <span class="axis">Y <input type="range" id="rot-y" min="-180" max="180" value="0"><output id="out-y">0°</output></span>
+    <span class="axis">Z <input type="range" id="rot-z" min="-180" max="180" value="0"><output id="out-z">0°</output></span>
+    <button type="button" id="reset-pose">リセット</button>
+  </div>
+</section>
+
+<h2>ジョブ</h2>
+<div id="jobs"></div>
+
+<script type="module">
+import { RigViewer, POSE_PRESETS } from "/viewer.js";
+
+const $ = (id) => document.getElementById(id);
+
+// image-3d から開かれたときは ?job=<id> で該当ジョブだけを表示する
+const focusJobId = new URLSearchParams(location.search).get("job");
+if (focusJobId) $("focus-note").hidden = false;
+
+const viewer = new RigViewer($("viewer-canvas"));
+let previewJobId = null;
+let currentMotion = null;
+let seeking = false;
+// 現在のポーズ(度, XYZ)。three.js側とサーバ側で同じ表現を使う。
+let currentPose = {};
+
+$("form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const file = $("model").files[0];
+  if (!file) return;
+  const body = new FormData();
+  body.append("model", file);
+  body.append("params", JSON.stringify({
+    height_m: Number($("height").value),
+    up_axis: $("upAxis").value,
+    facing: $("facing").value,
+  }));
+  const res = await fetch("/api/rig", { method: "POST", body });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    alert(`リグ化に失敗しました: ${err.detail}`);
+    return;
+  }
+  await refresh();
+});
+
+// --- プレビュー -------------------------------------------------------------
+
+async function showPreview(job) {
+  previewJobId = job.job_id;
+  currentPose = {};
+  $("preview").hidden = false;
+  $("preview-name").textContent = job.original_filename ?? "";
+  const { boneNames } = await viewer.load(
+    `/api/rig/jobs/${job.job_id}/download?format=glb`,
+  );
+
+  const select = $("bone-select");
+  select.replaceChildren(
+    ...boneNames.map((name) => new Option(name, name)),
+  );
+  $("pose-preset").value = "tpose";
+  $("motion-select").value = "";
+  stopMotion();
+  syncSlidersToSelectedBone();
+}
+
+// --- モーション再生 (計画書 §7 R3-2) ----------------------------------------
+
+async function loadMotionList() {
+  const list = await (await fetch("/api/motions")).json();
+  $("motion-select").replaceChildren(
+    new Option("(なし)", ""),
+    ...list.map((m) => new Option(`${m.label} (${m.duration}s)`, m.name)),
+  );
+}
+loadMotionList().catch((err) => console.error(err));
+
+function stopMotion() {
+  currentMotion = null;
+  viewer.playMotion(null);
+  $("motion-play").disabled = true;
+  $("motion-seek").disabled = true;
+  $("motion-seek").value = 0;
+  $("motion-time").textContent = "0.00s";
+  $("download-motion").disabled = true;
+}
+
+$("motion-select").addEventListener("change", async (ev) => {
+  const name = ev.target.value;
+  if (!name) { stopMotion(); return; }
+  currentMotion = await (await fetch(`/api/motions/${name}`)).json();
+  // モーションとポーズは排他(どちらもボーン回転を上書きするため)
+  currentPose = {};
+  $("pose-preset").value = "tpose";
+  syncSlidersToSelectedBone();
+  viewer.playMotion(currentMotion);
+  $("motion-play").disabled = false;
+  $("motion-play").textContent = "一時停止";
+  $("motion-seek").disabled = false;
+  $("motion-seek").max = currentMotion.duration;
+  $("download-motion").disabled = false;
+});
+
+$("motion-play").addEventListener("click", () => {
+  if (!currentMotion) return;
+  const playing = !viewer.motionPlaying;
+  viewer.setMotionPlaying(playing);
+  $("motion-play").textContent = playing ? "一時停止" : "再生";
+});
+
+$("motion-seek").addEventListener("input", (ev) => {
+  if (!currentMotion) return;
+  seeking = true;
+  viewer.setMotionPlaying(false);
+  viewer.setMotionTime(Number(ev.target.value));
+  $("motion-play").textContent = "再生";
+  seeking = false;
+});
+
+// 再生中はシークバーを追従させる
+setInterval(() => {
+  if (!currentMotion || seeking || !viewer.motionPlaying) return;
+  $("motion-seek").value = viewer.motionTime;
+  $("motion-time").textContent = `${viewer.motionTime.toFixed(2)}s`;
+}, 100);
+
+$("download-motion").addEventListener("click", () => {
+  if (!previewJobId || !currentMotion) return;
+  window.location.href =
+    `/api/rig/jobs/${previewJobId}/download?format=glb&motion=${currentMotion.name}`;
+});
+
+function syncSlidersToSelectedBone() {
+  const degrees = currentPose[$("bone-select").value] ?? [0, 0, 0];
+  for (const [i, axis] of ["x", "y", "z"].entries()) {
+    $(`rot-${axis}`).value = degrees[i];
+    $(`out-${axis}`).textContent = `${Math.round(degrees[i])}°`;
+  }
+}
+
+function applyCurrentPose() {
+  // applyPose はモーションを解除する。UI側の状態も揃える。
+  viewer.applyPose(currentPose);
+  if (currentMotion) {
+    currentMotion = null;
+    $("motion-select").value = "";
+    $("motion-play").disabled = true;
+    $("motion-seek").disabled = true;
+    $("download-motion").disabled = true;
+  }
+}
+
+$("show-bones").addEventListener("change", (ev) => {
+  viewer.setBonesVisible(ev.target.checked);
+});
+
+$("pose-preset").addEventListener("change", (ev) => {
+  // プリセットは複製して持つ(スライダー操作で書き換わるため)
+  currentPose = structuredClone(POSE_PRESETS[ev.target.value] ?? {});
+  applyCurrentPose();
+  syncSlidersToSelectedBone();
+});
+
+$("bone-select").addEventListener("change", syncSlidersToSelectedBone);
+
+for (const [index, axis] of ["x", "y", "z"].entries()) {
+  $(`rot-${axis}`).addEventListener("input", (ev) => {
+    const bone = $("bone-select").value;
+    if (!bone) return;
+    const degrees = currentPose[bone] ?? [0, 0, 0];
+    degrees[index] = Number(ev.target.value);
+    currentPose[bone] = degrees;
+    $(`out-${axis}`).textContent = `${Math.round(degrees[index])}°`;
+    applyCurrentPose();
+  });
+}
+
+$("reset-pose").addEventListener("click", () => {
+  currentPose = {};
+  $("pose-preset").value = "tpose";
+  applyCurrentPose();
+  syncSlidersToSelectedBone();
+});
+
+$("download-posed").addEventListener("click", async () => {
+  if (!previewJobId) return;
+  const button = $("download-posed");
+  const label = button.textContent;
+  button.disabled = true;
+  button.textContent = "書き出し中...";
+  try {
+    const res = await fetch(`/api/rig/jobs/${previewJobId}/pose`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pose: currentPose, format: "glb" }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(err.detail);
+    }
+    const url = URL.createObjectURL(await res.blob());
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${previewJobId}_posed.glb`;
+    link.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    alert(`ポーズ済みGLBの書き出しに失敗しました: ${err.message}`);
+  } finally {
+    button.textContent = label;
+    button.disabled = false;
+  }
+});
+
+// --- ジョブ一覧 -------------------------------------------------------------
+
+function renderJob(job) {
+  const el = document.createElement("div");
+  el.className = "job";
+  const s = job.summary || {};
+  const w = s.weights || {};
+  const rows = [
+    ["状態", `<span class="status ${job.status}">${job.status}</span>`],
+    ["ファイル", job.original_filename ?? "-"],
+  ];
+  if (job.status === "completed") {
+    rows.push(["ボーン数", s.bone_count ?? "-"]);
+    rows.push(["ウェイト付与率", w.weighted_ratio != null
+      ? `${(w.weighted_ratio * 100).toFixed(1)}%` : "-"]);
+    rows.push(["Tポーズ判定", s.measurements?.t_pose ? "はい" : "いいえ"]);
+    rows.push(["処理時間", s.elapsed_sec != null ? `${s.elapsed_sec}s` : "-"]);
+  }
+  if (job.status === "completed" && s.vrm) {
+    rows.push(["VRM", `1.0 (humanoid ${s.vrm.human_bone_count}ボーン)`]);
+  }
+  const preview = job.has_preview
+    ? `<img src="/api/rig/jobs/${job.job_id}/preview.png" alt="プレビュー">` : "";
+  const links = [];
+  if (job.status === "completed") {
+    links.push(`<a href="/api/rig/jobs/${job.job_id}/download?format=glb">リグ済みGLB</a>`);
+    if (job.has_vrm) {
+      links.push(`<a href="/api/rig/jobs/${job.job_id}/download?format=vrm">VRM 1.0</a>`);
+    }
+  }
+  const download = links.length ? `ダウンロード: ${links.join(" / ")}` : "";
+  el.innerHTML = `
+    ${preview}
+    <div class="job-body">
+      <dl>${rows.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("")}</dl>
+      ${download}
+      ${job.error ? `<p class="err">${job.error}</p>` : ""}
+      ${(job.warnings || []).map((x) => `<p class="warn">⚠ ${x}</p>`).join("")}
+    </div>`;
+  if (job.status === "completed") {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = "3Dで見る";
+    button.style.marginTop = ".4rem";
+    button.addEventListener("click", () => showPreview(job));
+    el.querySelector(".job-body").appendChild(button);
+  }
+  return el;
+}
+
+async function refresh() {
+  const all = await (await fetch("/api/rig/jobs")).json();
+  const jobs = focusJobId ? all.filter((j) => j.job_id === focusJobId) : all;
+  const container = $("jobs");
+  container.replaceChildren(...jobs.map(renderJob));
+  if (focusJobId && jobs.length === 0) {
+    container.textContent = `ジョブ ${focusJobId} が見つかりません。`;
+  }
+  return jobs;
+}
+
+let autoPreviewDone = false;
+async function poll() {
+  const jobs = await refresh().catch(() => []);
+  // ?job= で開かれたときは完了しだい自動でプレビューを出す
+  if (focusJobId && !autoPreviewDone && jobs[0]?.status === "completed") {
+    autoPreviewDone = true;
+    showPreview(jobs[0]).catch((err) => console.error(err));
+  }
+  const busy = jobs.some((j) => ["queued", "rigging", "exporting"].includes(j.status));
+  setTimeout(poll, busy ? 1500 : 5000);
+}
+poll();
+</script>
+</body>
+</html>

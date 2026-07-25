@@ -1,0 +1,17 @@
+# rig-service 依存 (Python 3.11 専用 venv `.venv-rig` 前提)
+#
+# bpy は cp311 ホイールしか無いため Python 3.11 が必須。
+# システムに 3.11 が無い場合は uv で用意する:
+#   uv venv --python 3.11 .venv-rig
+#   uv pip install --python .venv-rig/bin/python -r requirements.txt
+#
+# 4.2 LTS は 2026-07 でサポート終了したため現行 LTS の 4.5 系にピンする。
+# 5.1 以降は cp313 のみで 3.11 には入らない。
+bpy==4.5.*
+fastapi
+uvicorn[standard]
+python-multipart
+
+# 開発・テスト用
+pytest
+httpx

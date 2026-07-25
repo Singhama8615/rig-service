@@ -1,0 +1,7 @@
+# Godot のインポートキャッシュと生成物(検証のたびに作り直される)
+/.godot/
+/model.glb
+/model.glb.import
+/shots/
+/verify_result.json
+*.uid
