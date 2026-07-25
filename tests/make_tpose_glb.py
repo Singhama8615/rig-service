@@ -63,10 +63,47 @@ def _chibi() -> list[tuple[str, tuple, tuple]]:
 SHAPES = {"humanoid": _humanoid, "chibi": _chibi}
 
 
+def _add_texture(bpy, obj) -> None:
+    """UV展開して、生成した画像をベースカラーに割り当てる。"""
+    bpy.ops.object.mode_set(mode="EDIT")
+    bpy.ops.mesh.select_all(action="SELECT")
+    bpy.ops.uv.smart_project(angle_limit=1.15)
+    bpy.ops.object.mode_set(mode="OBJECT")
+
+    image = bpy.data.images.new("BaseColor", width=64, height=64)
+    # 市松模様(UVが壊れたら見て分かるように)
+    pixels = []
+    for y in range(64):
+        for x in range(64):
+            v = 1.0 if (x // 8 + y // 8) % 2 else 0.15
+            pixels += [v, v * 0.6, 0.2, 1.0]
+    image.pixels = pixels
+
+    material = bpy.data.materials.new("Textured")
+    material.use_nodes = True
+    bsdf = material.node_tree.nodes["Principled BSDF"]
+    tex = material.node_tree.nodes.new("ShaderNodeTexImage")
+    tex.image = image
+    material.node_tree.links.new(bsdf.inputs["Base Color"], tex.outputs["Color"])
+    obj.data.materials.append(material)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--output", type=Path, required=True)
     ap.add_argument("--shape", choices=sorted(SHAPES), default="humanoid")
+    ap.add_argument(
+        "--textured",
+        action="store_true",
+        help="UVマップとベースカラーテクスチャを付けて書き出す"
+             "(リグ処理でテクスチャが失われないかの検証用)",
+    )
+    ap.add_argument(
+        "--fragmented",
+        action="store_true",
+        help="フラットシェードのまま書き出し、頂点が法線ごとに分割された"
+             "断片だらけのGLBを作る(テクスチャ付きGLBのUVシーム分割の再現)",
+    )
     args = ap.parse_args()
     parts = SHAPES[args.shape]()
 
@@ -98,7 +135,11 @@ def main() -> int:
     # フラットシェーディングのままだと glTF エクスポータが法線ごとに頂点を分割し、
     # 再インポート時に面単位のバラバラなメッシュになる(=実際の生成メッシュと
     # 性質が違うテストデータになってしまう)。スムーズシェードで溶接を保つ。
-    bpy.ops.object.shade_smooth()
+    if not args.fragmented:
+        bpy.ops.object.shade_smooth()
+
+    if args.textured:
+        _add_texture(bpy, bpy.context.active_object)
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     # export_yup=False で Blender の Z-up をそのまま書き出す(=image-3d 慣習)

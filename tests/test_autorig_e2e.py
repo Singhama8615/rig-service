@@ -141,3 +141,71 @@ def test_engine_reports_failure_for_non_mesh_glb(tmp_path):
         BpyEngine().rig(
             empty, tmp_path / "out.glb", RigParams(preview=False), tmp_path, 600
         )
+
+
+def test_rigs_a_fragmented_mesh(tmp_path):
+    """UVシームで頂点分割されたメッシュでもリグが付くこと(実機バグの回帰)。
+
+    テクスチャ付きGLB(`texture_mode=paint` の出力)は、UVアトラス境界で頂点が
+    複製され数千個の連結成分に分断されている。ボーンヒートは連結メッシュ上で
+    熱方程式を解くため、溶接せずに投げると**ウェイトが1つも付かない**まま
+    `skins` の無い不正なglTFが出来ていた(実測: 140087頂点/5900成分で付与率0%)。
+    """
+    fragmented = tmp_path / "fragmented.glb"
+    subprocess.run(
+        [
+            sys.executable, str(MAKE_GLB), "--shape", "humanoid",
+            "--fragmented", "--output", str(fragmented),
+        ],
+        check=True, capture_output=True, timeout=600,
+    )
+
+    out = tmp_path / "rigged.glb"
+    result = BpyEngine().rig(
+        fragmented, out, RigParams(height_m=1.6, preview=False), tmp_path, 600
+    )
+
+    weights = result.summary["weights"]
+    assert weights["unweighted_vertices"] == 0
+    assert weights["weighted_ratio"] == 1.0
+    # 溶接されて頂点数が減っていること
+    assert weights["vertices"] < 6528
+
+    gltf = _read_glb_json(out)
+    assert len(gltf["skins"][0]["joints"]) == 21
+    # スキンを参照するノードがあること(これが無いと静的メッシュ扱いになる)
+    assert any("skin" in node for node in gltf["nodes"])
+
+
+def test_preserves_texture_and_uvs(tmp_path):
+    """マテリアル・テクスチャ・UVがリグ処理を通り抜けること。
+
+    リグのために頂点を溶接するが、Blender は UV を面コーナーごとに持つので
+    テクスチャは壊れない。実運用では image-3d の `texture_mode=paint` 出力
+    (色付きモデル)がこの経路を通る。
+    """
+    textured = tmp_path / "textured.glb"
+    subprocess.run(
+        [
+            sys.executable, str(MAKE_GLB), "--shape", "humanoid",
+            "--textured", "--output", str(textured),
+        ],
+        check=True, capture_output=True, timeout=600,
+    )
+    source = _read_glb_json(textured)
+    assert source["materials"], "フィクスチャにマテリアルが付いていない"
+
+    out = tmp_path / "rigged.glb"
+    result = BpyEngine().rig(
+        textured, out, RigParams(height_m=1.6, preview=False), tmp_path, 600
+    )
+    assert result.summary["weights"]["weighted_ratio"] == 1.0
+
+    gltf = _read_glb_json(out)
+    attributes = gltf["meshes"][0]["primitives"][0]["attributes"]
+    assert "TEXCOORD_0" in attributes, "UVが失われた"
+    assert "JOINTS_0" in attributes and "WEIGHTS_0" in attributes
+    assert gltf["materials"], "マテリアルが失われた"
+    assert gltf["images"], "テクスチャ画像が失われた"
+    assert "baseColorTexture" in gltf["materials"][0]["pbrMetallicRoughness"]
+    assert len(gltf["skins"][0]["joints"]) == 21
