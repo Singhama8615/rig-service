@@ -209,3 +209,24 @@ def test_preserves_texture_and_uvs(tmp_path):
     assert gltf["images"], "テクスチャ画像が失われた"
     assert "baseColorTexture" in gltf["materials"][0]["pbrMetallicRoughness"]
     assert len(gltf["skins"][0]["joints"]) == 21
+
+
+@pytest.mark.parametrize("facing", ["-y", "+y", "auto"])
+def test_explicit_facing_is_accepted(fixtures, tmp_path, facing):
+    """`facing` の値はハイフンで始まる("-y")。
+
+    引数を別トークンで渡すと argparse がオプション名と誤認して
+    「expected one argument」で落ちる。実機で image-3d が座標系を明示した
+    ときに初めて露見したので、3値すべてを通しておく。
+    """
+    out = tmp_path / f"rigged_{facing.replace('+', 'p').replace('-', 'm')}.glb"
+    result = BpyEngine().rig(
+        fixtures["humanoid"],
+        out,
+        RigParams(height_m=1.6, preview=False, facing=facing),
+        tmp_path,
+        600,
+    )
+    assert result.summary["normalize"]["facing"] in ("-y", "+y")
+    if facing != "auto":
+        assert result.summary["normalize"]["facing"] == facing

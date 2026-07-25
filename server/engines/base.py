@@ -86,14 +86,17 @@ class RigEngine(ABC):
 
         args = [
             str(input_glb),
-            "--output", str(output_glb),
-            "--result", str(result_path),
-            "--height-m", str(params.height_m),
-            "--up-axis", params.up_axis,
-            "--facing", params.facing,
+            # `--facing` の値は "-y" のようにハイフンで始まりうる。
+            # 値を別トークンで渡すと argparse がオプション名と誤認して
+            # 「expected one argument」で落ちるため、`=` 形式で繋ぐ。
+            f"--output={output_glb}",
+            f"--result={result_path}",
+            f"--height-m={params.height_m}",
+            f"--up-axis={params.up_axis}",
+            f"--facing={params.facing}",
         ]
         if preview_path is not None:
-            args += ["--preview", str(preview_path)]
+            args.append(f"--preview={preview_path}")
 
         cmd = self.command(args)
         logger.info("running rig engine %s: %s", self.name, " ".join(cmd))
