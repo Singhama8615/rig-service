@@ -286,3 +286,23 @@ def test_bone_layout_chain_is_ordered_bottom_up():
     # 脚は下向き、つま先は正面(-Y)側
     assert bones["LeftUpperLeg"].tail[2] < bones["LeftUpperLeg"].head[2]
     assert bones["LeftToes"].tail[1] < 0
+
+
+def test_detect_facing_prefers_head_cue_on_disagreement():
+    """足と後頭部が食い違ったら後頭部を採る(実測で後頭部のほうが当たる)。
+
+    Pixal3D のぬいぐるみ体型は大きな前足が前後に張り出し、足の手がかりが
+    ほぼ機能しない(実測 3/8)。後頭部は 8/8 で正しかった。
+    """
+    h = 1.6
+    rng = np.random.default_rng(3)
+    # つま先は +Y 側(足の手がかりは「正面は +Y」と言う)
+    cloud = tpose_cloud(facing=1)
+    # 後頭部の膨らみ(髪)も +Y 側に置く(頭の手がかりは「背面が +Y」= 正面は -Y)
+    # 髪は薄くする(大きすぎるとbbox中心ごと動いて足の手がかりまで反転する)
+    hair = _box((0, 0.045 * h, 0.95 * h), (0.15 * h, 0.05 * h, 0.08 * h), 1200, rng)
+    cloud = np.vstack([cloud, hair])
+
+    sign, confident = proportions.detect_facing(cloud)
+    assert confident is False, "手がかりの食い違いが検出されていない"
+    assert sign == -1, "後頭部の手がかりを採れていない"

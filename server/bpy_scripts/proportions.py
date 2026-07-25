@@ -191,7 +191,14 @@ def detect_facing(verts: np.ndarray) -> tuple[int, bool]:
         # 前後対称で頭部からは判断できない(素体など)。足の手がかりだけを採る。
         return feet_sign, True
     head_sign = -1 if lean > 0 else 1
-    return feet_sign, feet_sign == head_sign
+
+    # 食い違ったときは**頭部の手がかりを優先する**。image-3d の生成物77体で
+    # 突き合わせた結果(正解は設計上すべて -Y):
+    #   足の突出   hunyuan3d 57/62 ・ pixal3d 3/8  = 86%
+    #   後頭部     hunyuan3d 56/62 ・ pixal3d 8/8  = 91%
+    # 特に pixal3d のぬいぐるみ体型では足の手がかりがほぼ機能しない
+    # (大きな前足が前後に張り出すため)。
+    return head_sign, feet_sign == head_sign
 
 
 def normalize_matrix(
