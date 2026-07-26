@@ -99,6 +99,19 @@ class Measurements:
     # 実測できず既定値へフォールバックした項目名(ジョブの警告として返す)
     fallbacks: list[str] = field(default_factory=list)
 
+    def scaled(self, factor: float) -> "Measurements":
+        """全長を factor 倍したときの計測値を返す(比率は不変)。
+
+        リグ付けは作業スケールで行い最後に縮めるため、報告値も同じ倍率で
+        揃える必要がある(autorig の `_RIG_WORKING_HEIGHT` 参照)。
+        """
+        lengths = {
+            name: value * factor
+            for name, value in self.__dict__.items()
+            if name not in ("t_pose", "fallbacks")
+        }
+        return Measurements(t_pose=self.t_pose, fallbacks=list(self.fallbacks), **lengths)
+
     def to_dict(self) -> dict:
         skip = {"fallbacks", "t_pose"}
         d = {k: v for k, v in self.__dict__.items() if k not in skip}

@@ -33,6 +33,15 @@ import proportions  # noqa: E402  (同ディレクトリのスタンドアロン
 # glTF は 1頂点あたり最大4ボーン影響が標準(JOINTS_0/WEIGHTS_0 の1セット)。
 MAX_BONE_INFLUENCES = 4
 
+# リグ付けを行う作業スケール(この高さに正規化してからボーンヒートを回す)。
+#
+# **ボーンヒートは絶対スケールに依存する**。同一メッシュ(20万面)で実測すると
+# 高さ100m/10m/3.2m では全頂点にウェイトが付くのに、**1.6m では1頂点も付かない**
+# (0.8m も同様)。目的の身長(既定1.6m)へ先に縮めてからウェイト付けすると、
+# 三角形が Blender 内部の許容値を下回って解が得られなくなる。
+# そこで Blender の既定単位に近い大きさでリグ付けし、**最後に目的の身長へ縮める**。
+_RIG_WORKING_HEIGHT = 100.0
+
 
 class RigError(RuntimeError):
     """リグ処理を継続できない入力・状態。"""
@@ -206,6 +215,25 @@ def _auto_weight(bpy, mesh, arm) -> None:
     bpy.ops.object.vertex_group_normalize_all(lock_active=False)
 
 
+def _apply_final_scale(bpy, mesh, arm, factor: float) -> None:
+    """スキニング済みのメッシュとアーマチュアをまとめて縮める。
+
+    ウェイト付けの後に縮めるのは、ボーンヒートが絶対スケールに依存するため
+    (`_RIG_WORKING_HEIGHT` 参照)。メッシュとアーマチュアを同時に選択して
+    スケールを適用すれば、スキンの対応関係は保たれる。
+    """
+    from mathutils import Matrix
+
+    bpy.ops.object.select_all(action="DESELECT")
+    mesh.select_set(True)
+    arm.select_set(True)
+    bpy.context.view_layer.objects.active = arm
+    arm.matrix_world = Matrix.Scale(factor, 4) @ arm.matrix_world
+    mesh.matrix_world = Matrix.Scale(factor, 4) @ mesh.matrix_world
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    _log("scale", f"作業スケールから x{factor:g} で最終サイズへ")
+
+
 def _weight_stats(mesh, bones: list[proportions.BoneSpec]) -> tuple[dict, list[str]]:
     """ウェイト付与状況を集計し、破綻の兆候を警告文にする。"""
     group_names = [g.name for g in mesh.vertex_groups]
@@ -304,16 +332,24 @@ def run(
     import bpy  # noqa: PLC0415 — Blender CLI 実行時は起動後にしか存在しない
 
     mesh = _import_and_join(bpy, input_path)
-    normalize_info = _normalize(bpy, mesh, height_m, up_axis, facing)
+    # ボーンヒートが解けるよう、いったん作業スケールへ正規化する
+    # (目的の身長へ縮めるのはウェイト付けの後。_RIG_WORKING_HEIGHT 参照)
+    normalize_info = _normalize(bpy, mesh, _RIG_WORKING_HEIGHT, up_axis, facing)
 
     verts = _world_vertices(mesh)
     measurements = proportions.measure(verts)
-    _log("measure", json.dumps(measurements.to_dict()))
     bones = proportions.bone_layout(measurements)
 
     arm = _build_armature(bpy, bones)
     _auto_weight(bpy, mesh, arm)
     stats, warnings = _weight_stats(mesh, bones)
+
+    # ここまで作業スケールで進めたので、最後に目的の身長へ縮める
+    final_scale = height_m / _RIG_WORKING_HEIGHT
+    _apply_final_scale(bpy, mesh, arm, final_scale)
+    measurements = measurements.scaled(final_scale)
+    normalize_info["scale"] = round(normalize_info["scale"] * final_scale, 8)
+    _log("measure", json.dumps(measurements.to_dict()))
 
     if not normalize_info.get("facing_confident", True):
         warnings.append(

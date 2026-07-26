@@ -230,3 +230,46 @@ def test_explicit_facing_is_accepted(fixtures, tmp_path, facing):
     assert result.summary["normalize"]["facing"] in ("-y", "+y")
     if facing != "auto":
         assert result.summary["normalize"]["facing"] == facing
+
+
+@pytest.mark.parametrize("height_m", [1.6, 0.3])
+def test_rigs_at_small_target_heights(fixtures, tmp_path, height_m):
+    """小さい身長を指定してもウェイトが付くこと(実機バグの回帰)。
+
+    **ボーンヒートは絶対スケールに依存する**。20万面の実メッシュで計測すると
+    高さ100m/10m/3.2m では全頂点にウェイトが付くのに、1.6m では1頂点も付かず
+    ジョブが失敗していた。目的の身長へ先に縮めてからウェイト付けしていたのが
+    原因で、現在は作業スケールでリグ付けしてから縮めている。
+    """
+    out = tmp_path / f"rigged_{height_m}.glb"
+    result = BpyEngine().rig(
+        fixtures["humanoid"],
+        out,
+        RigParams(height_m=height_m, preview=False),
+        tmp_path,
+        600,
+    )
+
+    assert result.summary["weights"]["weighted_ratio"] == 1.0
+    assert result.summary["weights"]["unweighted_vertices"] == 0
+
+    gltf = _read_glb_json(out)
+    accessor = gltf["accessors"][
+        gltf["meshes"][0]["primitives"][0]["attributes"]["POSITION"]
+    ]
+    # 指定した身長で書き出されていること(作業スケールが残っていない)
+    assert accessor["max"][1] - accessor["min"][1] == pytest.approx(height_m, abs=0.02)
+    assert accessor["min"][1] == pytest.approx(0.0, abs=0.02)
+    assert len(gltf["skins"][0]["joints"]) == 21
+
+
+def test_measurements_are_reported_in_target_scale(fixtures, tmp_path):
+    """計測値の報告も最終スケール(メートル)であること。"""
+    out = tmp_path / "rigged.glb"
+    result = BpyEngine().rig(
+        fixtures["humanoid"], out, RigParams(height_m=1.6, preview=False), tmp_path, 600
+    )
+    measurements = result.summary["measurements"]
+    assert measurements["height"] == pytest.approx(1.6, abs=0.01)
+    # 比率は作業スケールでの値と一致する(素体の肩は全高の約0.82)
+    assert measurements["shoulder_z"] / measurements["height"] == pytest.approx(0.82, rel=0.1)
