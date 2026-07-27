@@ -252,3 +252,67 @@ def test_bow_leans_the_head_forward():
     rest = _rest_world("Head")
     bowed = _world_at("bow", 1, "Head")
     assert bowed[2] > rest[2] + 0.03, "お辞儀で頭が前に出ていない"
+
+
+@pytest.mark.parametrize("name", ["idle", "walk", "run", "bow"])
+@pytest.mark.parametrize("side", ["Left", "Right"])
+def test_clips_turn_the_palms_inward(name, side):
+    """腕を下ろすクリップでは手のひらが正面ではなく内を向くこと。"""
+    from server import pose
+    from tests.glb_fixture import rigged_gltf
+
+    gltf = rigged_gltf()
+
+    def world_rotation(g, bone):
+        nodes = g["nodes"]
+        parent = {c: i for i, n in enumerate(nodes) for c in n.get("children", [])}
+        index = next(i for i, n in enumerate(nodes) if n.get("name") == bone)
+        chain = []
+        while index is not None:
+            chain.append(index)
+            index = parent.get(index)
+        q = pose.IDENTITY
+        for i in reversed(chain):
+            q = pose.quat_multiply(q, tuple(nodes[i].get("rotation", pose.IDENTITY)))
+        return q
+
+    def rotate(q, v):
+        conj = (-q[0], -q[1], -q[2], q[3])
+        return pose.quat_multiply(pose.quat_multiply(q, (*v, 0.0)), conj)[:3]
+
+    rest = world_rotation(gltf, f"{side}Hand")
+    palm_local = rotate((-rest[0], -rest[1], -rest[2], rest[3]), (0.0, 0.0, 1.0))
+
+    clip = motions.get(name)
+    pose.apply_pose(
+        gltf,
+        {n: pose.quat_from_euler_degrees(k[0][1]) for n, k in clip.tracks.items()},
+    )
+    palm = rotate(world_rotation(gltf, f"{side}Hand"), palm_local)
+    inward = -palm[0] if side == "Left" else palm[0]
+    assert inward > 0.4, f"{name}: 手のひらが内を向いていない"
+
+
+def test_run_is_faster_and_swings_wider_than_walk():
+    walk, run = motions.get("walk"), motions.get("run")
+    assert run.duration < walk.duration, "走りが歩きより遅い"
+
+    def swing(clip_name, bone):
+        a = _world_at(clip_name, 0, bone)[2]
+        b = _world_at(clip_name, 1, bone)[2]
+        return abs(b - a)
+
+    assert swing("run", "LeftFoot") > swing("walk", "LeftFoot"), "走りの脚の振りが小さい"
+
+
+def test_run_keeps_the_elbows_bent():
+    """走りは肘を曲げたままにする(手が肘より前に来ること)。"""
+    elbow = _world_at("run", 0, "LeftLowerArm")
+    hand = _world_at("run", 0, "LeftHand")
+    assert hand[2] > elbow[2] + 0.05, "肘が伸びている"
+
+
+def test_run_leans_the_torso_forward():
+    rest = _rest_world("Head")
+    running = _world_at("run", 0, "Head")
+    assert running[2] > rest[2] + 0.02, "走りで前傾していない"

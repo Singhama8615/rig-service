@@ -77,8 +77,10 @@ class Motion:
 # 書くこと。生の (x, y, z) を書くと腕と体幹で軸の意味が違うため必ず取り違える
 # (腕を下ろしたつもりが前へ突き出す)。
 _BASE_INTENT: dict[str, dict[str, float]] = {
-    "LeftUpperArm": {"down": 68.0},
-    "RightUpperArm": {"down": 68.0},
+    # twist=90: レストのTポーズでは手のひらが正面を向いているので、下ろすだけだと
+    # 手のひらが前を向いたままになる。内向きにして自然な立ち姿にする。
+    "LeftUpperArm": {"down": 68.0, "twist": 90.0},
+    "RightUpperArm": {"down": 68.0, "twist": 90.0},
     "LeftLowerArm": {"down": 12.0, "forward": 10.0},
     "RightLowerArm": {"down": 12.0, "forward": 10.0},
 }
@@ -263,7 +265,84 @@ def _walk() -> Motion:
     )
 
 
-MOTIONS: dict[str, Motion] = {m.name: m for m in (_idle(), _wave(), _bow(), _walk())}
+def _run() -> Motion:
+    """その場走り。歩きより速く、振りが大きく、肘を曲げて前傾する。
+
+    歩きと同じくルートモーション(ヒップの前進・上下動)は持たない。クリップは
+    回転トラックだけで表現しているため(`bake_into_gltf` も rotation のみ書く)、
+    上下のバウンドは載せられない。再生側で足したい場合はヒップを別途動かす。
+    """
+    d = 0.6
+    half = d / 2
+
+    def leg(side: str, swing_first: bool) -> tuple[list[Keyframe], list[Keyframe]]:
+        a, b = (45.0, -35.0) if swing_first else (-35.0, 45.0)
+        upper = [
+            (0.0, bone_euler(f"{side}UpperLeg", forward=a)),
+            (half, bone_euler(f"{side}UpperLeg", forward=b)),
+            (d, bone_euler(f"{side}UpperLeg", forward=a)),
+        ]
+        # 走りは膝を深く畳む。曲げ = 足首を後ろへ送る = forward が負。
+        bend_a, bend_b = (-20.0, -85.0) if swing_first else (-85.0, -20.0)
+        lower = [
+            (0.0, bone_euler(f"{side}LowerLeg", forward=bend_a)),
+            (half, bone_euler(f"{side}LowerLeg", forward=bend_b)),
+            (d, bone_euler(f"{side}LowerLeg", forward=bend_a)),
+        ]
+        return upper, lower
+
+    left_upper, left_lower = leg("Left", True)
+    right_upper, right_lower = leg("Right", False)
+
+    # 走りの腕は立ち姿(_BASE_INTENT)から作らない。立ち姿は**肩を**ねじって
+    # 手のひらを内へ向けているが、肩をねじると肘の曲がる向き(子の軸)まで
+    # 一緒に回り、肘を深く曲げる走りでは前腕が体の前を横切ってしまう。
+    # 走りは肩をねじらず前後に振り、**前腕をねじって**手のひらを内へ向ける。
+    def arm(bone: str, leg_swings_first: bool) -> list[Keyframe]:
+        """同じ側の脚と逆位相。走りは歩きより大きく振る。"""
+        a, b = (-40.0, 40.0) if leg_swings_first else (40.0, -40.0)
+        return [
+            (0.0, bone_euler(bone, down=70.0, forward=a)),
+            (half, bone_euler(bone, down=70.0, forward=b)),
+            (d, bone_euler(bone, down=70.0, forward=a)),
+        ]
+
+    def forearm(bone: str) -> list[Keyframe]:
+        """走りは肘を曲げたまま保ち、手のひらを内へ向ける。"""
+        bent = bone_euler(bone, forward=85.0, twist=90.0)
+        return [(0.0, bent), (half, bent), (d, bent)]
+
+    return Motion(
+        name="run",
+        label="その場走り",
+        duration=d,
+        loop=True,
+        tracks={
+            "LeftUpperLeg": left_upper,
+            "LeftLowerLeg": left_lower,
+            "RightUpperLeg": right_upper,
+            "RightLowerLeg": right_lower,
+            "LeftUpperArm": arm("LeftUpperArm", True),
+            "RightUpperArm": arm("RightUpperArm", False),
+            "LeftLowerArm": forearm("LeftLowerArm"),
+            "RightLowerArm": forearm("RightLowerArm"),
+            # 走りは前傾し、歩きより大きくひねる
+            "Spine": [
+                (0.0, bone_euler("Spine", forward=12.0, twist=-6.0)),
+                (half, bone_euler("Spine", forward=12.0, twist=6.0)),
+                (d, bone_euler("Spine", forward=12.0, twist=-6.0)),
+            ],
+            "Head": [
+                (0.0, bone_euler("Head", forward=-8.0)),
+                (d, bone_euler("Head", forward=-8.0)),
+            ],
+        },
+    )
+
+
+MOTIONS: dict[str, Motion] = {
+    m.name: m for m in (_idle(), _wave(), _bow(), _walk(), _run())
+}
 
 
 def get(name: str) -> Motion:

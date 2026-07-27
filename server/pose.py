@@ -111,7 +111,9 @@ def bone_euler(
         down: 正で腕を**下ろす**(腕のボーンのみ。体幹を前に倒すのは `forward`)。
         forward: 正で先端を**前(+Z, キャラの正面)へ**振る。膝を曲げる(足首を
             後ろへ送る)は負の `forward`。
-        twist: 正で骨の軸まわりに**ねじる**。
+        twist: 骨の軸まわりのねじり。腕では正で**手のひらが内(体の側)を向く**
+            (レストのTポーズでは手のひらが正面を向いているため、90 でほぼ真横=
+            自然に腕を下ろした向きになる)。体幹・頭では正で左を向く。
 
     Returns:
         `quat_from_euler_degrees` に渡せる (x, y, z)。
@@ -119,9 +121,22 @@ def bone_euler(
     if bone not in _VRM_TO_BONE.values() and bone not in vrm.BONE_TO_VRM:
         raise PoseError(f"未知のボーンです: {bone}")
     if bone in _ARM_BONES:
-        # 腕: ローカルX=上下, ローカルY=ねじり, ローカルZ=前後(左右で反転)
+        # 腕: ローカルX=上下, ローカルY=ねじり, ローカルZ=前後。
+        # 骨方向が左右で逆(±X)なので、**前後もねじりも左右で符号が反転する**
+        # (下ろすだけが同符号)。反転を忘れると片手だけ手のひらが外を向く。
         side = -1.0 if bone.startswith("Left") else 1.0
-        return (-down, twist, side * forward)
+        # **ねじりは振りのあとに掛ける**。XYZ順(Rx·Ry·Rz)のまま Y にねじりを
+        # 入れると、続く Z(前後)の軸までねじられて前後の振りが上下に化ける
+        # (実測: 腕の前後移動が 22cm から 3cm に落ちた)。振ってから骨軸まわりに
+        # ねじる合成を作り、保存できる XYZ 角へ戻す。
+        rotation = quat_multiply(
+            quat_multiply(
+                quat_from_euler_degrees((-down, 0.0, 0.0)),
+                quat_from_euler_degrees((0.0, 0.0, side * forward)),
+            ),
+            quat_from_euler_degrees((0.0, -side * twist, 0.0)),
+        )
+        return quat_to_euler_degrees(rotation)
     if down:
         raise PoseError(f"{bone} に down は使えません(腕のボーンのみ)。forward を使ってください。")
     # 体幹・脚・頭: ローカルX=前後。下向きの骨は先端の動く向きが反転する。
@@ -141,8 +156,10 @@ _POSE_INTENTS: dict[str, tuple[str, dict[str, dict[str, float]]]] = {
     "arms_down": (
         "腕を下ろす",
         {
-            "LeftUpperArm": {"down": 70.0},
-            "RightUpperArm": {"down": 70.0},
+            # twist=90: レストでは手のひらが正面を向いているので、下ろすだけだと
+            # 手のひらが前を向いたままになる。内向きにして自然な立ち姿にする。
+            "LeftUpperArm": {"down": 70.0, "twist": 90.0},
+            "RightUpperArm": {"down": 70.0, "twist": 90.0},
             "LeftLowerArm": {"down": 25.0},
             "RightLowerArm": {"down": 25.0},
         },
@@ -150,8 +167,8 @@ _POSE_INTENTS: dict[str, tuple[str, dict[str, dict[str, float]]]] = {
     "relaxed": (
         "自然な立ち姿",
         {
-            "LeftUpperArm": {"down": 65.0},
-            "RightUpperArm": {"down": 65.0},
+            "LeftUpperArm": {"down": 65.0, "twist": 90.0},
+            "RightUpperArm": {"down": 65.0, "twist": 90.0},
             "LeftLowerArm": {"down": 20.0, "forward": 20.0},
             "RightLowerArm": {"down": 20.0, "forward": 20.0},
             "LeftUpperLeg": {"forward": 5.0},
@@ -165,9 +182,10 @@ _POSE_INTENTS: dict[str, tuple[str, dict[str, dict[str, float]]]] = {
     "wave": (
         "手を振る",
         {
+            # 挙げた手は手のひらを前に向けたままにする(ねじり無し)
             "LeftUpperArm": {"down": -25.0},
             "LeftLowerArm": {"forward": 40.0, "twist": -20.0},
-            "RightUpperArm": {"down": 70.0},
+            "RightUpperArm": {"down": 70.0, "twist": 90.0},
             "RightLowerArm": {"down": 25.0},
             "Head": {"twist": 15.0},
         },
@@ -184,6 +202,35 @@ def presets() -> dict[str, dict[str, Any]]:
         }
         for name, (label, bones) in _POSE_INTENTS.items()
     }
+
+
+def quat_to_euler_degrees(q: Quaternion) -> tuple[float, float, float]:
+    """クォータニオンを three.js "XYZ" 規約のオイラー角(度)に戻す。
+
+    `quat_from_euler_degrees` の逆。クリップやAPIはオイラー角で角度を持つので、
+    「振ってからねじる」のように XYZ 順では表せない合成を作ったあと、
+    保存できる形に直すのに使う。
+    """
+    x, y, z, w = q
+    # 回転行列の必要な成分だけを組む(R = Rx·Ry·Rz)
+    r00 = 1 - 2 * (y * y + z * z)
+    r01 = 2 * (x * y - z * w)
+    r02 = 2 * (x * z + y * w)
+    r12 = 2 * (y * z - x * w)
+    r22 = 1 - 2 * (x * x + y * y)
+    r11 = 1 - 2 * (x * x + z * z)
+    r21 = 2 * (y * z + x * w)
+
+    sy = max(-1.0, min(1.0, r02))
+    ey = math.asin(sy)
+    if abs(sy) < 0.9999999:
+        ex = math.atan2(-r12, r22)
+        ez = math.atan2(-r01, r00)
+    else:
+        # ジンバルロック: X と Z が同じ軸に潰れるので Z を 0 に寄せる
+        ex = math.atan2(r21, r11)
+        ez = 0.0
+    return tuple(math.degrees(v) for v in (ex, ey, ez))  # type: ignore[return-value]
 
 
 def normalize(q: Quaternion) -> Quaternion:

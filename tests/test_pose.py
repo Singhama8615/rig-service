@@ -273,3 +273,91 @@ def test_pose_presets_lower_the_arms():
     after = _world(gltf, "LeftHand")
     assert after[1] < before[1] - 0.1, "arms_down で手が下がっていない"
     assert abs(after[2] - before[2]) < 0.15, "arms_down で腕が前へ突き出している"
+
+
+# --- 手のひらの向き -----------------------------------------------------------
+#
+# レストのTポーズでは手のひらが正面(+Z)を向いている。腕を下ろしただけだと
+# 手のひらが前を向いたままになるため、`twist` で内向きにする。
+
+
+def _palm_direction(side: str, **intent: float):
+    """指定のポーズを当てたときの手のひらのワールド方向を返す。"""
+    import math
+
+    gltf = rigged_gltf()
+
+    def world_rotation(g, bone):
+        nodes = g["nodes"]
+        parent = {c: i for i, n in enumerate(nodes) for c in n.get("children", [])}
+        index = next(i for i, n in enumerate(nodes) if n.get("name") == bone)
+        chain = []
+        while index is not None:
+            chain.append(index)
+            index = parent.get(index)
+        q = pose.IDENTITY
+        for i in reversed(chain):
+            q = pose.quat_multiply(q, tuple(nodes[i].get("rotation", pose.IDENTITY)))
+        return q
+
+    def rotate(q, v):
+        qv = (v[0], v[1], v[2], 0.0)
+        conj = (-q[0], -q[1], -q[2], q[3])
+        r = pose.quat_multiply(pose.quat_multiply(q, qv), conj)
+        return r[:3]
+
+    rest = world_rotation(gltf, f"{side}Hand")
+    inverse_rest = (-rest[0], -rest[1], -rest[2], rest[3])
+    palm_local = rotate(inverse_rest, (0.0, 0.0, 1.0))  # レストでは +Z を向く
+
+    pose.apply_pose(gltf, {f"{side}UpperArm": pose.bone_quat(f"{side}UpperArm", **intent)})
+    return rotate(world_rotation(gltf, f"{side}Hand"), palm_local)
+
+
+@pytest.mark.parametrize("side", ["Left", "Right"])
+def test_lowering_the_arm_alone_leaves_the_palm_facing_forward(side):
+    """ねじらないと手のひらは正面を向いたまま(報告された見た目)。"""
+    palm = _palm_direction(side, down=70)
+    assert palm[2] > 0.9, "手のひらが正面を向いていない"
+
+
+@pytest.mark.parametrize("side", ["Left", "Right"])
+def test_twist_turns_the_palm_inward_on_both_sides(side):
+    """`twist` は正で**左右とも**手のひらを内(体の側)へ向ける。"""
+    palm = _palm_direction(side, down=70, twist=90)
+    inward = -palm[0] if side == "Left" else palm[0]
+    assert inward > 0.9, "手のひらが内を向いていない(左右の反転を忘れている)"
+
+
+@pytest.mark.parametrize("side", ["Left", "Right"])
+def test_twist_does_not_steal_the_forward_swing(side):
+    """ねじりを入れても前後の振りが効くこと。
+
+    XYZ順のまま Y にねじりを入れると、続く Z(前後)の軸までねじられて
+    前後の振りが上下に化ける。
+    """
+    plain = _tip_after(f"{side}UpperArm", f"{side}Hand", down=70, forward=40)
+    twisted = _tip_after(f"{side}UpperArm", f"{side}Hand", down=70, twist=90, forward=40)
+    assert twisted[2] > 0.1, "ねじりを入れると腕が前に出なくなっている"
+    assert twisted[2] == pytest.approx(plain[2], abs=0.03)
+
+
+@pytest.mark.parametrize("side", ["Left", "Right"])
+def test_arms_down_preset_turns_the_palm_inward(side):
+    presets = pose.presets()
+    gltf = rigged_gltf()
+    pose.apply_pose(gltf, pose.parse_pose(presets["arms_down"]["pose"]))
+    # プリセット適用後の手の位置が体側に下りていることは別テストで見ているので、
+    # ここでは意図(twist)がプリセットに入っていることを確かめる
+    assert presets["arms_down"]["pose"][f"{side}UpperArm"] != list(
+        pose.bone_euler(f"{side}UpperArm", down=70)
+    ), "arms_down にねじりが入っていない"
+
+
+def test_quat_to_euler_round_trips():
+    for angles in [(0, 0, 0), (20, -35, 50), (-70, 0, 25), (10, 89, -10)]:
+        q = pose.quat_from_euler_degrees(angles)
+        back = pose.quat_from_euler_degrees(pose.quat_to_euler_degrees(q))
+        assert back == pytest.approx(q, abs=1e-6) or back == pytest.approx(
+            tuple(-v for v in q), abs=1e-6
+        )
