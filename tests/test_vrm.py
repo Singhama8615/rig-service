@@ -65,7 +65,7 @@ def test_build_human_bones_points_at_correct_nodes():
 def test_build_extension_rejects_missing_required_bone():
     without_hips = [b for b in BONES if b[0] != "Hips"]
     # Hips を消すと子が根なし子になるが、必須ボーン欠けとして弾かれることを見る
-    gltf = rigged_gltf([(n, p if p != "Hips" else None, t) for n, p, t in without_hips])
+    gltf = rigged_gltf([(n, p if p != "Hips" else None, t, r) for n, p, t, r in without_hips])
     with pytest.raises(vrm.VrmError, match="必須ボーン"):
         vrm.build_extension(gltf, vrm.VrmMeta(name="x", authors=["y"]))
 
@@ -180,7 +180,7 @@ def test_validate_detects_bone_outside_hips_hierarchy(tmp_path, meta):
 
 def test_convert_rejects_model_that_would_be_invalid(tmp_path, meta):
     """検証に落ちる出力はファイルを書かずに例外にする。"""
-    detached = [(n, None if n == "LeftUpperLeg" else p, t) for n, p, t in BONES]
+    detached = [(n, None if n == "LeftUpperLeg" else p, t, r) for n, p, t, r in BONES]
     src = tmp_path / "detached.glb"
     src.write_bytes(rigged_glb(detached))
     out = tmp_path / "out.vrm"
@@ -190,25 +190,39 @@ def test_convert_rejects_model_that_would_be_invalid(tmp_path, meta):
     assert not out.exists()
 
 
+def _mirror(gltf, axis: int) -> None:
+    """モデルを指定軸で鏡像にする(平行移動と回転の両方)。
+
+    ボーンの向きはローカル回転にも入っている(肩・股関節がローカル系を
+    入れ替える)ため、平行移動だけ反転しても腕はワールド上で同じ側に伸びたまま
+    になる。鏡映 M に対し回転は `M R M⁻¹` で、クォータニオンでは反転軸**以外**の
+    虚部の符号が反転する。
+    """
+    for node in gltf["nodes"]:
+        node["translation"][axis] *= -1
+        rotation = node.get("rotation")
+        if rotation:
+            for i in range(3):
+                if i != axis:
+                    rotation[i] *= -1
+
+
 def test_validate_detects_upside_down_model(tmp_path, meta):
     gltf = _converted(tmp_path, meta)
-    for node in gltf["nodes"]:
-        node["translation"][1] *= -1
+    _mirror(gltf, 1)
     assert any("Y-up" in e for e in vrm.validate(gltf))
 
 
 def test_validate_detects_mirrored_model(tmp_path, meta):
     gltf = _converted(tmp_path, meta)
-    for node in gltf["nodes"]:
-        node["translation"][0] *= -1
+    _mirror(gltf, 0)
     assert any("左右が反転" in e for e in vrm.validate(gltf))
 
 
 def test_validate_detects_backwards_facing_model(tmp_path, meta):
     """VRM 1.0 はアバターが +Z を向くことを要求する。"""
     gltf = _converted(tmp_path, meta)
-    for node in gltf["nodes"]:
-        node["translation"][2] *= -1
+    _mirror(gltf, 2)
     assert any("+Z を向いていない" in e for e in vrm.validate(gltf))
 
 

@@ -170,3 +170,85 @@ def test_bake_twice_adds_two_animations():
     gltf, binary = motions.bake_into_gltf(gltf, b"", motions.get("idle"))
     gltf, binary = motions.bake_into_gltf(gltf, binary, motions.get("wave"))
     assert [a["name"] for a in gltf["animations"]] == ["idle", "wave"]
+
+
+# --- クリップがワールドでどう動くか -------------------------------------------
+#
+# 「腕を下ろしたつもりが前へ突き出す」「歩くと腕が前に出たまま」の再発防止。
+# キーフレームの数値ではなく、適用後のワールド位置で確かめる。
+
+
+def _world_at(motion_name: str, key_index: int, bone: str):
+    from server import pose, vrm
+    from tests.glb_fixture import rigged_gltf
+
+    gltf = rigged_gltf()
+    clip = motions.get(motion_name)
+    applied = {
+        name: pose.quat_from_euler_degrees(keys[key_index][1])
+        for name, keys in clip.tracks.items()
+    }
+    pose.apply_pose(gltf, applied)
+    index = next(i for i, n in enumerate(gltf["nodes"]) if n["name"] == bone)
+    return vrm.world_translations(gltf)[index]
+
+
+def _rest_world(bone: str):
+    from server import vrm
+    from tests.glb_fixture import rigged_gltf
+
+    gltf = rigged_gltf()
+    index = next(i for i, n in enumerate(gltf["nodes"]) if n["name"] == bone)
+    return vrm.world_translations(gltf)[index]
+
+
+@pytest.mark.parametrize("name", ["idle", "walk", "bow"])
+@pytest.mark.parametrize("side", ["Left", "Right"])
+def test_clips_keep_the_arms_down_not_thrust_forward(name, side):
+    """待機・歩行・お辞儀では腕は体側に下りていること。
+
+    腕のローカル軸は体幹と入れ替わっているため、軸を取り違えると
+    「下ろしたつもりが前へ水平に突き出す」状態になる(報告済みの不具合)。
+    """
+    hand = f"{side}Hand"
+    rest = _rest_world(hand)
+    posed = _world_at(name, 0, hand)
+
+    assert posed[1] < rest[1] - 0.1, f"{name}: 腕が下りていない"
+    # 前後の振り(歩行)は許容するが、下がった量より大きくは出ない
+    drop = rest[1] - posed[1]
+    assert abs(posed[2] - rest[2]) < drop, f"{name}: 腕が前へ突き出している"
+
+
+def test_walk_swings_the_arms_in_opposite_phase():
+    """歩行で左右の腕が前後に、かつ互いに逆位相で振れること。"""
+    start_left = _world_at("walk", 0, "LeftHand")[2]
+    start_right = _world_at("walk", 0, "RightHand")[2]
+    mid_left = _world_at("walk", 1, "LeftHand")[2]
+    mid_right = _world_at("walk", 1, "RightHand")[2]
+
+    assert abs(mid_left - start_left) > 0.05, "腕が前後に振れていない"
+    assert (start_left > start_right) != (mid_left > mid_right), "左右の腕が逆位相でない"
+
+
+def test_walk_swings_the_legs_in_opposite_phase():
+    start_left = _world_at("walk", 0, "LeftFoot")[2]
+    start_right = _world_at("walk", 0, "RightFoot")[2]
+    mid_left = _world_at("walk", 1, "LeftFoot")[2]
+    mid_right = _world_at("walk", 1, "RightFoot")[2]
+
+    assert abs(start_left - start_right) > 0.05, "脚が前後に開いていない"
+    assert (start_left > start_right) != (mid_left > mid_right), "左右の脚が逆位相でない"
+
+
+def test_walk_swings_each_arm_opposite_to_the_leg_on_the_same_side():
+    """同じ側の腕と脚は逆に振れること(歩行として自然な位相)。"""
+    hand = _world_at("walk", 0, "LeftHand")[2] - _rest_world("LeftHand")[2]
+    foot = _world_at("walk", 0, "LeftFoot")[2] - _rest_world("LeftFoot")[2]
+    assert hand * foot < 0, "左腕と左脚が同じ向きに振れている"
+
+
+def test_bow_leans_the_head_forward():
+    rest = _rest_world("Head")
+    bowed = _world_at("bow", 1, "Head")
+    assert bowed[2] > rest[2] + 0.03, "お辞儀で頭が前に出ていない"

@@ -158,6 +158,12 @@ async def list_motions():
     return [m.summary() for m in motions.MOTIONS.values()]
 
 
+@app.get("/api/poses")
+async def list_poses():
+    """ポーズプリセット。ボーンごとに軸の意味が違うため定義元はサーバに置く。"""
+    return pose.presets()
+
+
 @app.get("/api/motions/{name}")
 async def get_motion(name: str):
     """クリップのキーフレーム(ブラウザ再生用)。"""

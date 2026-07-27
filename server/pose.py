@@ -64,6 +64,128 @@ def quat_from_euler_degrees(xyz: Iterable[float]) -> Quaternion:
     return quat_multiply(quat_multiply(qx, qy), qz)
 
 
+# --- 解剖学的な向き -> ボーンローカルのオイラー角 -----------------------------
+#
+# ボーンのローカル系は「+Y が head→tail」で、残り2軸は Blender のロール規約で
+# 決まる(`bpy_scripts/autorig.py` は head/tail だけを与え、ロールは既定)。
+# そのため**ボーンの向きによってローカル軸の意味が変わる**:
+#
+#   - 体幹・頭・脚(垂直に伸びる) … ローカル軸はワールド軸とほぼ一致し、
+#     ローカルX = 左右軸 = 前後に振る軸
+#   - 腕(Tポーズで水平に ±X へ伸びる) … 肩ボーンが系を入れ替えるため
+#     **ローカルX = ワールドZ(前後)、ローカルY = ワールドX(骨方向=ねじり)、
+#     ローカルZ = ワールドY(上下)**
+#
+# つまり腕だけ「上下に振る軸」と「前後に振る軸」が体幹と入れ替わっている。
+# ここを取り違えると *腕を下ろしたつもりが前へ突き出す*(実測・報告済み)。
+# クリップやプリセットが生の (x, y, z) を書くと必ず間違えるので、
+# 意味づけからオイラー角を作るのはこの関数だけにする。
+#
+# 符号はリグ済み実機(21ボーン)で測って決めた。落とし穴が2つある:
+#
+#   1. 腕の「下ろす」は**左右とも同符号**で、「前に出す」だけが左右で反転する
+#      (骨方向が ±X と逆向きなため)
+#   2. **上に伸びる骨(体幹)と下に伸びる骨(脚)は、同じローカルX回転でも
+#      先端が逆向きに動く**。実測: Spine X+22 は前傾、UpperLeg X+28 は後ろ振り。
+
+_ARM_BONES = frozenset(
+    {"LeftUpperArm", "RightUpperArm", "LeftLowerArm", "RightLowerArm", "LeftHand", "RightHand"}
+)
+_DOWNWARD_BONES = frozenset(
+    {
+        "LeftUpperLeg", "RightUpperLeg",
+        "LeftLowerLeg", "RightLowerLeg",
+        "LeftFoot", "RightFoot",
+        "LeftToes", "RightToes",
+    }
+)
+
+
+def bone_euler(
+    bone: str, *, down: float = 0.0, forward: float = 0.0, twist: float = 0.0
+) -> tuple[float, float, float]:
+    """解剖学的な指定をそのボーンのローカルオイラー角(度, XYZ)に変換する。
+
+    Args:
+        bone: リグのボーン名。
+        down: 正で腕を**下ろす**(腕のボーンのみ。体幹を前に倒すのは `forward`)。
+        forward: 正で先端を**前(+Z, キャラの正面)へ**振る。膝を曲げる(足首を
+            後ろへ送る)は負の `forward`。
+        twist: 正で骨の軸まわりに**ねじる**。
+
+    Returns:
+        `quat_from_euler_degrees` に渡せる (x, y, z)。
+    """
+    if bone not in _VRM_TO_BONE.values() and bone not in vrm.BONE_TO_VRM:
+        raise PoseError(f"未知のボーンです: {bone}")
+    if bone in _ARM_BONES:
+        # 腕: ローカルX=上下, ローカルY=ねじり, ローカルZ=前後(左右で反転)
+        side = -1.0 if bone.startswith("Left") else 1.0
+        return (-down, twist, side * forward)
+    if down:
+        raise PoseError(f"{bone} に down は使えません(腕のボーンのみ)。forward を使ってください。")
+    # 体幹・脚・頭: ローカルX=前後。下向きの骨は先端の動く向きが反転する。
+    sign = -1.0 if bone in _DOWNWARD_BONES else 1.0
+    return (sign * forward, twist, 0.0)
+
+
+def bone_quat(bone: str, **kwargs: float) -> Quaternion:
+    """`bone_euler` の結果をクォータニオンで返す。"""
+    return quat_from_euler_degrees(bone_euler(bone, **kwargs))
+
+
+# ブラウザのプリセット。**ここを唯一の定義元**にし、`GET /api/poses` で配る
+# (viewer.js に生の角度を複製すると、軸の意味を取り違えたまま片方だけ直る)。
+_POSE_INTENTS: dict[str, tuple[str, dict[str, dict[str, float]]]] = {
+    "tpose": ("Tポーズ(レスト)", {}),
+    "arms_down": (
+        "腕を下ろす",
+        {
+            "LeftUpperArm": {"down": 70.0},
+            "RightUpperArm": {"down": 70.0},
+            "LeftLowerArm": {"down": 25.0},
+            "RightLowerArm": {"down": 25.0},
+        },
+    ),
+    "relaxed": (
+        "自然な立ち姿",
+        {
+            "LeftUpperArm": {"down": 65.0},
+            "RightUpperArm": {"down": 65.0},
+            "LeftLowerArm": {"down": 20.0, "forward": 20.0},
+            "RightLowerArm": {"down": 20.0, "forward": 20.0},
+            "LeftUpperLeg": {"forward": 5.0},
+            "RightUpperLeg": {"forward": 5.0},
+            "LeftLowerLeg": {"forward": -8.0},
+            "RightLowerLeg": {"forward": -8.0},
+            "Head": {"forward": -5.0},
+            "Spine": {"forward": 5.0},
+        },
+    ),
+    "wave": (
+        "手を振る",
+        {
+            "LeftUpperArm": {"down": -25.0},
+            "LeftLowerArm": {"forward": 40.0, "twist": -20.0},
+            "RightUpperArm": {"down": 70.0},
+            "RightLowerArm": {"down": 25.0},
+            "Head": {"twist": 15.0},
+        },
+    ),
+}
+
+
+def presets() -> dict[str, dict[str, Any]]:
+    """ポーズプリセットを {name: {label, pose}} で返す(pose はオイラー角・度)。"""
+    return {
+        name: {
+            "label": label,
+            "pose": {bone: list(bone_euler(bone, **intent)) for bone, intent in bones.items()},
+        }
+        for name, (label, bones) in _POSE_INTENTS.items()
+    }
+
+
 def normalize(q: Quaternion) -> Quaternion:
     length = math.sqrt(sum(v * v for v in q))
     if length == 0.0:

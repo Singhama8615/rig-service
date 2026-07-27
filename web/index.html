@@ -107,12 +107,8 @@
   <div class="viewer-controls">
     <label><input type="checkbox" id="show-bones"> ボーン表示</label>
     <label>ポーズ
-      <select id="pose-preset">
-        <option value="tpose">Tポーズ(レスト)</option>
-        <option value="arms_down">腕を下ろす</option>
-        <option value="relaxed">リラックス</option>
-        <option value="wave">手を振る</option>
-      </select>
+      <!-- 選択肢は /api/poses から埋める(定義元は server/pose.py) -->
+      <select id="pose-preset"></select>
     </label>
     <span class="spacer"></span>
     <button type="button" id="download-posed">ポーズ済みGLBを保存</button>
@@ -132,7 +128,7 @@
 <div id="jobs"></div>
 
 <script type="module">
-import { RigViewer, POSE_PRESETS } from "/viewer.js";
+import { RigViewer, POSE_PRESETS, loadPosePresets } from "/viewer.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -408,6 +404,21 @@ async function poll() {
   const busy = jobs.some((j) => ["queued", "rigging", "exporting"].includes(j.status));
   setTimeout(poll, busy ? 1500 : 5000);
 }
+
+// ポーズプリセットはサーバが定義元(ボーンごとに軸の意味が違うため)
+loadPosePresets()
+  .then((presets) => {
+    $("pose-preset").replaceChildren(
+      ...Object.entries(presets).map(([name, entry]) => {
+        const option = document.createElement("option");
+        option.value = name;
+        option.textContent = entry.label;
+        return option;
+      })
+    );
+  })
+  .catch((err) => console.error(err));
+
 poll();
 </script>
 </body>

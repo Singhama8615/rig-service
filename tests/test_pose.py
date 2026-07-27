@@ -143,7 +143,7 @@ def test_apply_pose_moves_descendants():
     gltf = rigged_gltf()
     before = _world(gltf, "LeftHand")
 
-    pose.apply_pose(gltf, pose.parse_pose({"LeftUpperArm": [0, 0, -70]}))
+    pose.apply_pose(gltf, pose.parse_pose({"LeftUpperArm": pose.bone_euler("LeftUpperArm", down=70)}))
     after = _world(gltf, "LeftHand")
 
     assert after[1] < before[1], "腕を下ろしたのに手が下がっていない"
@@ -153,7 +153,7 @@ def test_apply_pose_moves_descendants():
 def test_apply_pose_does_not_move_unposed_bones():
     gltf = rigged_gltf()
     before = _world(gltf, "RightHand")
-    pose.apply_pose(gltf, pose.parse_pose({"LeftUpperArm": [0, 0, -70]}))
+    pose.apply_pose(gltf, pose.parse_pose({"LeftUpperArm": pose.bone_euler("LeftUpperArm", down=70)}))
     assert _world(gltf, "RightHand") == pytest.approx(before)
 
 
@@ -165,7 +165,7 @@ def test_pose_glb_writes_posed_file(tmp_path):
     src.write_bytes(rigged_glb())
     dst = tmp_path / "posed.glb"
 
-    summary = pose.pose_glb(src, dst, {"LeftUpperArm": [0, 0, -70]})
+    summary = pose.pose_glb(src, dst, {"LeftUpperArm": pose.bone_euler("LeftUpperArm", down=70)})
 
     assert summary["applied_bones"] == ["LeftUpperArm"]
     assert dst.exists()
@@ -200,3 +200,76 @@ def test_empty_pose_is_a_noop(tmp_path):
 
     assert summary["applied_bones"] == []
     assert vrm.read_glb(dst)[0]["nodes"] == vrm.read_glb(src)[0]["nodes"]
+
+
+# --- 解剖学的な指定 -> ボーンローカル軸 ---------------------------------------
+#
+# 「腕を下ろしたら前へ突き出した」不具合の再発防止。ボーンローカルのオイラー角を
+# 直接主張するのではなく、**ワールドでどちらへ動いたか**を見る。
+
+
+def _tip_after(bone: str, child: str, **intent: float):
+    """`bone` に解剖学的な指定を当てたときの `child` のワールド移動量を返す。"""
+    gltf = rigged_gltf()
+    before = _world(gltf, child)
+    pose.apply_pose(gltf, {bone: pose.bone_quat(bone, **intent)})
+    after = _world(gltf, child)
+    return [a - b for a, b in zip(after, before)]
+
+
+@pytest.mark.parametrize("side", ["Left", "Right"])
+def test_down_lowers_the_arm_without_pushing_it_forward(side):
+    """`down` は腕を**下げる**。前後にはほとんど動かないこと。"""
+    delta = _tip_after(f"{side}UpperArm", f"{side}Hand", down=70)
+    assert delta[1] < -0.1, "腕が下がっていない"
+    assert abs(delta[2]) < 0.02, "腕が前後に突き出している"
+
+
+@pytest.mark.parametrize("side", ["Left", "Right"])
+def test_forward_swings_the_arm_forward_on_both_sides(side):
+    """`forward` は左右とも**前(+Z)**へ振る(骨方向が逆でも符号は揃う)。"""
+    delta = _tip_after(f"{side}UpperArm", f"{side}Hand", forward=40)
+    assert delta[2] > 0.1, "腕が前に出ていない"
+    assert abs(delta[1]) < 0.02, "腕が上下に動いている"
+
+
+@pytest.mark.parametrize("side", ["Left", "Right"])
+def test_twist_does_not_move_the_arm_tip(side):
+    """`twist` は骨の軸まわりなので手の位置はほぼ変わらない。"""
+    delta = _tip_after(f"{side}UpperArm", f"{side}Hand", twist=45)
+    assert max(abs(v) for v in delta) < 0.02
+
+
+@pytest.mark.parametrize("side", ["Left", "Right"])
+def test_forward_swings_the_leg_forward(side):
+    delta = _tip_after(f"{side}UpperLeg", f"{side}Foot", forward=30)
+    assert delta[2] > 0.1, "脚が前に出ていない"
+
+
+@pytest.mark.parametrize("side", ["Left", "Right"])
+def test_negative_forward_bends_the_knee_backwards(side):
+    """膝は後ろにしか曲がらない(逆関節にならないこと)。"""
+    delta = _tip_after(f"{side}LowerLeg", f"{side}Foot", forward=-40)
+    assert delta[2] < -0.05, "膝が前に曲がっている(逆関節)"
+
+
+def test_forward_bows_the_spine_forward():
+    delta = _tip_after("Spine", "Head", forward=25)
+    assert delta[2] > 0.05, "上体が前に倒れていない"
+
+
+def test_down_is_rejected_for_non_arm_bones():
+    """体幹に down を渡すと静かに変な向きへ回るのではなく落ちること。"""
+    with pytest.raises(pose.PoseError, match="down"):
+        pose.bone_euler("Spine", down=20)
+
+
+def test_pose_presets_lower_the_arms():
+    """プリセット `arms_down` が実際に手を下げること(定義元はサーバ)。"""
+    presets = pose.presets()
+    gltf = rigged_gltf()
+    before = _world(gltf, "LeftHand")
+    pose.apply_pose(gltf, pose.parse_pose(presets["arms_down"]["pose"]))
+    after = _world(gltf, "LeftHand")
+    assert after[1] < before[1] - 0.1, "arms_down で手が下がっていない"
+    assert abs(after[2] - before[2]) < 0.15, "arms_down で腕が前へ突き出している"

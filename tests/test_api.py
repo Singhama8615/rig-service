@@ -272,10 +272,14 @@ def _completed(client, params=None):
 
 
 def test_pose_endpoint_returns_posed_glb(client):
+    from server.pose import bone_euler
+
     job = _completed(client)
     res = client.post(
         f"/api/rig/jobs/{job['job_id']}/pose",
-        json={"pose": {"LeftUpperArm": [0, 0, -70]}},
+        # 生の (x, y, z) ではなく解剖学的な指定から作る。腕はローカル軸が体幹と
+        # 入れ替わっており、`[0, 0, -70]` は下ろすのではなく前へ突き出す。
+        json={"pose": {"LeftUpperArm": list(bone_euler("LeftUpperArm", down=70))}},
     )
     assert res.status_code == 200
     assert res.content.startswith(b"glTF")

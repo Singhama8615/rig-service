@@ -13,34 +13,21 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 
 // レスト姿勢からの相対回転(度, XYZ順)。サーバ側 server/pose.py と同じ意味づけ。
-export const POSE_PRESETS = {
-  tpose: {},
-  arms_down: {
-    LeftUpperArm: [0, 0, -70],
-    RightUpperArm: [0, 0, 70],
-    LeftLowerArm: [0, 0, -25],
-    RightLowerArm: [0, 0, 25],
-  },
-  relaxed: {
-    LeftUpperArm: [0, 0, -65],
-    RightUpperArm: [0, 0, 65],
-    LeftLowerArm: [-20, 0, -20],
-    RightLowerArm: [-20, 0, 20],
-    LeftUpperLeg: [25, 0, 0],
-    RightUpperLeg: [25, 0, 0],
-    LeftLowerLeg: [-45, 0, 0],
-    RightLowerLeg: [-45, 0, 0],
-    Head: [-10, 0, 0],
-    Spine: [5, 0, 0],
-  },
-  wave: {
-    LeftUpperArm: [0, 0, 25],
-    LeftLowerArm: [0, -40, 20],
-    RightUpperArm: [0, 0, 70],
-    RightLowerArm: [0, 0, 25],
-    Head: [0, 15, 0],
-  },
-};
+//
+// **角度をここに直書きしないこと**。ボーンのローカル軸は骨の向きで意味が変わり
+// (腕は上下と前後が体幹と入れ替わる)、複製すると片方だけ直した状態で静かに
+// ずれる。定義元は server/pose.py で、`GET /api/poses` から取得する。
+export const POSE_PRESETS = { tpose: {} };
+
+export async function loadPosePresets() {
+  const res = await fetch("/api/poses");
+  if (!res.ok) throw new Error(`ポーズプリセットを取得できません (${res.status})`);
+  const data = await res.json();
+  for (const [name, entry] of Object.entries(data)) {
+    POSE_PRESETS[name] = entry.pose;
+  }
+  return data;
+}
 
 export class RigViewer {
   constructor(canvas) {
