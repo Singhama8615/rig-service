@@ -361,3 +361,14 @@ def test_quat_to_euler_round_trips():
         assert back == pytest.approx(q, abs=1e-6) or back == pytest.approx(
             tuple(-v for v in q), abs=1e-6
         )
+
+
+@pytest.mark.parametrize("preset", ["arms_down", "relaxed"])
+@pytest.mark.parametrize("side", ["Left", "Right"])
+def test_standing_presets_keep_the_arms_clear_of_the_body(preset, side):
+    """立ち姿のプリセットで腕が体に密着しないこと。"""
+    gltf = rigged_gltf()
+    hip = abs(_world(gltf, f"{side}UpperLeg")[0])
+    pose.apply_pose(gltf, pose.parse_pose(pose.presets()[preset]["pose"]))
+    hand = abs(_world(gltf, f"{side}Hand")[0])
+    assert hand > hip * 1.5, f"{preset}: 腕が体に密着している"

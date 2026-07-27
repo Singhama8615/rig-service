@@ -316,3 +316,16 @@ def test_run_leans_the_torso_forward():
     rest = _rest_world("Head")
     running = _world_at("run", 0, "Head")
     assert running[2] > rest[2] + 0.02, "走りで前傾していない"
+
+
+@pytest.mark.parametrize("name", ["idle", "walk", "run", "bow"])
+@pytest.mark.parametrize("side", ["Left", "Right"])
+def test_clips_keep_the_arms_clear_of_the_body(name, side):
+    """腕が体に密着しないこと(手が股関節より外側にあること)。
+
+    `down` を 90 に近づけるほど腕は体に貼り付く。丸い体型では 70 で脇が
+    めり込んで見えたため `pose.STANDING_ARM_DOWN` まで開けている。
+    """
+    hip = abs(_rest_world(f"{side}UpperLeg")[0])
+    hand = abs(_world_at(name, 0, f"{side}Hand")[0])
+    assert hand > hip * 1.5, f"{name}: 腕が体に密着している"

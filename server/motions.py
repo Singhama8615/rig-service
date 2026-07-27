@@ -24,6 +24,7 @@ import struct
 from dataclasses import dataclass, field
 from typing import Any
 
+from . import pose as pose_module
 from .pose import Quaternion, bone_euler, quat_from_euler_degrees, quat_multiply
 from .vrm import BONE_TO_VRM
 
@@ -76,13 +77,13 @@ class Motion:
 # 角度は必ず `pose.bone_euler` の**解剖学的な指定**(down / forward / twist)で
 # 書くこと。生の (x, y, z) を書くと腕と体幹で軸の意味が違うため必ず取り違える
 # (腕を下ろしたつもりが前へ突き出す)。
+# 立ち姿の角度は `pose` 側を定義元にする(プリセットとクリップで姿勢が
+# 食い違わないように)。twist はレストで正面を向く手のひらを内へ向けるため。
 _BASE_INTENT: dict[str, dict[str, float]] = {
-    # twist=90: レストのTポーズでは手のひらが正面を向いているので、下ろすだけだと
-    # 手のひらが前を向いたままになる。内向きにして自然な立ち姿にする。
-    "LeftUpperArm": {"down": 68.0, "twist": 90.0},
-    "RightUpperArm": {"down": 68.0, "twist": 90.0},
-    "LeftLowerArm": {"down": 12.0, "forward": 10.0},
-    "RightLowerArm": {"down": 12.0, "forward": 10.0},
+    "LeftUpperArm": {"down": pose_module.STANDING_ARM_DOWN, "twist": pose_module.STANDING_ARM_TWIST},
+    "RightUpperArm": {"down": pose_module.STANDING_ARM_DOWN, "twist": pose_module.STANDING_ARM_TWIST},
+    "LeftLowerArm": {"down": pose_module.STANDING_FOREARM_DOWN, "forward": 10.0},
+    "RightLowerArm": {"down": pose_module.STANDING_FOREARM_DOWN, "forward": 10.0},
 }
 _BASE = {bone: bone_euler(bone, **intent) for bone, intent in _BASE_INTENT.items()}
 
@@ -274,6 +275,8 @@ def _run() -> Motion:
     """
     d = 0.6
     half = d / 2
+    # 走りは肘を前に構えるぶん、立ち姿より少し閉じてよい
+    _RUN_ARM_DOWN = pose_module.STANDING_ARM_DOWN + 8.0
 
     def leg(side: str, swing_first: bool) -> tuple[list[Keyframe], list[Keyframe]]:
         a, b = (45.0, -35.0) if swing_first else (-35.0, 45.0)
@@ -302,9 +305,9 @@ def _run() -> Motion:
         """同じ側の脚と逆位相。走りは歩きより大きく振る。"""
         a, b = (-40.0, 40.0) if leg_swings_first else (40.0, -40.0)
         return [
-            (0.0, bone_euler(bone, down=70.0, forward=a)),
-            (half, bone_euler(bone, down=70.0, forward=b)),
-            (d, bone_euler(bone, down=70.0, forward=a)),
+            (0.0, bone_euler(bone, down=_RUN_ARM_DOWN, forward=a)),
+            (half, bone_euler(bone, down=_RUN_ARM_DOWN, forward=b)),
+            (d, bone_euler(bone, down=_RUN_ARM_DOWN, forward=a)),
         ]
 
     def forearm(bone: str) -> list[Keyframe]:

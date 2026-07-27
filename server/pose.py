@@ -149,6 +149,14 @@ def bone_quat(bone: str, **kwargs: float) -> Quaternion:
     return quat_from_euler_degrees(bone_euler(bone, **kwargs))
 
 
+# 自然に腕を下ろした立ち姿の角度。`down` は 90 に近づくほど腕が体に密着する。
+# 70 だと丸い体型(ぬいぐるみ系)では脇が体にめり込んで見えたため、少し開ける。
+# クリップ(`motions.py`)とプリセットで同じ立ち姿になるよう、ここを定義元にする。
+STANDING_ARM_DOWN = 58.0
+STANDING_FOREARM_DOWN = 15.0
+# レストのTポーズは手のひらが正面を向くので、内向きにするねじり。
+STANDING_ARM_TWIST = 90.0
+
 # ブラウザのプリセット。**ここを唯一の定義元**にし、`GET /api/poses` で配る
 # (viewer.js に生の角度を複製すると、軸の意味を取り違えたまま片方だけ直る)。
 _POSE_INTENTS: dict[str, tuple[str, dict[str, dict[str, float]]]] = {
@@ -156,21 +164,21 @@ _POSE_INTENTS: dict[str, tuple[str, dict[str, dict[str, float]]]] = {
     "arms_down": (
         "腕を下ろす",
         {
-            # twist=90: レストでは手のひらが正面を向いているので、下ろすだけだと
+            # twist: レストでは手のひらが正面を向いているので、下ろすだけだと
             # 手のひらが前を向いたままになる。内向きにして自然な立ち姿にする。
-            "LeftUpperArm": {"down": 70.0, "twist": 90.0},
-            "RightUpperArm": {"down": 70.0, "twist": 90.0},
-            "LeftLowerArm": {"down": 25.0},
-            "RightLowerArm": {"down": 25.0},
+            "LeftUpperArm": {"down": STANDING_ARM_DOWN, "twist": STANDING_ARM_TWIST},
+            "RightUpperArm": {"down": STANDING_ARM_DOWN, "twist": STANDING_ARM_TWIST},
+            "LeftLowerArm": {"down": STANDING_FOREARM_DOWN},
+            "RightLowerArm": {"down": STANDING_FOREARM_DOWN},
         },
     ),
     "relaxed": (
         "自然な立ち姿",
         {
-            "LeftUpperArm": {"down": 65.0, "twist": 90.0},
-            "RightUpperArm": {"down": 65.0, "twist": 90.0},
-            "LeftLowerArm": {"down": 20.0, "forward": 20.0},
-            "RightLowerArm": {"down": 20.0, "forward": 20.0},
+            "LeftUpperArm": {"down": STANDING_ARM_DOWN - 3, "twist": STANDING_ARM_TWIST},
+            "RightUpperArm": {"down": STANDING_ARM_DOWN - 3, "twist": STANDING_ARM_TWIST},
+            "LeftLowerArm": {"down": STANDING_FOREARM_DOWN, "forward": 20.0},
+            "RightLowerArm": {"down": STANDING_FOREARM_DOWN, "forward": 20.0},
             "LeftUpperLeg": {"forward": 5.0},
             "RightUpperLeg": {"forward": 5.0},
             "LeftLowerLeg": {"forward": -8.0},
@@ -185,8 +193,8 @@ _POSE_INTENTS: dict[str, tuple[str, dict[str, dict[str, float]]]] = {
             # 挙げた手は手のひらを前に向けたままにする(ねじり無し)
             "LeftUpperArm": {"down": -25.0},
             "LeftLowerArm": {"forward": 40.0, "twist": -20.0},
-            "RightUpperArm": {"down": 70.0, "twist": 90.0},
-            "RightLowerArm": {"down": 25.0},
+            "RightUpperArm": {"down": STANDING_ARM_DOWN, "twist": STANDING_ARM_TWIST},
+            "RightLowerArm": {"down": STANDING_FOREARM_DOWN},
             "Head": {"twist": 15.0},
         },
     ),
