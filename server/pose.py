@@ -159,56 +159,64 @@ STANDING_ARM_TWIST = 90.0
 
 # ブラウザのプリセット。**ここを唯一の定義元**にし、`GET /api/poses` で配る
 # (viewer.js に生の角度を複製すると、軸の意味を取り違えたまま片方だけ直る)。
-_POSE_INTENTS: dict[str, tuple[str, dict[str, dict[str, float]]]] = {
-    "tpose": ("Tポーズ(レスト)", {}),
-    "arms_down": (
-        "腕を下ろす",
-        {
-            # twist: レストでは手のひらが正面を向いているので、下ろすだけだと
-            # 手のひらが前を向いたままになる。内向きにして自然な立ち姿にする。
-            "LeftUpperArm": {"down": STANDING_ARM_DOWN, "twist": STANDING_ARM_TWIST},
-            "RightUpperArm": {"down": STANDING_ARM_DOWN, "twist": STANDING_ARM_TWIST},
-            "LeftLowerArm": {"down": STANDING_FOREARM_DOWN},
-            "RightLowerArm": {"down": STANDING_FOREARM_DOWN},
-        },
-    ),
-    "relaxed": (
-        "自然な立ち姿",
-        {
-            "LeftUpperArm": {"down": STANDING_ARM_DOWN - 3, "twist": STANDING_ARM_TWIST},
-            "RightUpperArm": {"down": STANDING_ARM_DOWN - 3, "twist": STANDING_ARM_TWIST},
-            "LeftLowerArm": {"down": STANDING_FOREARM_DOWN, "forward": 20.0},
-            "RightLowerArm": {"down": STANDING_FOREARM_DOWN, "forward": 20.0},
-            "LeftUpperLeg": {"forward": 5.0},
-            "RightUpperLeg": {"forward": 5.0},
-            "LeftLowerLeg": {"forward": -8.0},
-            "RightLowerLeg": {"forward": -8.0},
-            "Head": {"forward": -5.0},
-            "Spine": {"forward": 5.0},
-        },
-    ),
-    "wave": (
-        "手を振る",
-        {
-            # 挙げた手は手のひらを前に向けたままにする(ねじり無し)
-            "LeftUpperArm": {"down": -25.0},
-            "LeftLowerArm": {"forward": 40.0, "twist": -20.0},
-            "RightUpperArm": {"down": STANDING_ARM_DOWN, "twist": STANDING_ARM_TWIST},
-            "RightLowerArm": {"down": STANDING_FOREARM_DOWN},
-            "Head": {"twist": 15.0},
-        },
-    ),
-}
+def _pose_intents(arm_down: float) -> dict[str, tuple[str, dict[str, dict[str, float]]]]:
+    twist = STANDING_ARM_TWIST
+    forearm = STANDING_FOREARM_DOWN
+    return {
+        "tpose": ("Tポーズ(レスト)", {}),
+        "arms_down": (
+            "腕を下ろす",
+            {
+                # twist: レストでは手のひらが正面を向いているので、下ろすだけだと
+                # 手のひらが前を向いたままになる。内向きにして自然な立ち姿にする。
+                "LeftUpperArm": {"down": arm_down, "twist": twist},
+                "RightUpperArm": {"down": arm_down, "twist": twist},
+                "LeftLowerArm": {"down": forearm},
+                "RightLowerArm": {"down": forearm},
+            },
+        ),
+        "relaxed": (
+            "自然な立ち姿",
+            {
+                "LeftUpperArm": {"down": arm_down - 3, "twist": twist},
+                "RightUpperArm": {"down": arm_down - 3, "twist": twist},
+                "LeftLowerArm": {"down": forearm, "forward": 20.0},
+                "RightLowerArm": {"down": forearm, "forward": 20.0},
+                "LeftUpperLeg": {"forward": 5.0},
+                "RightUpperLeg": {"forward": 5.0},
+                "LeftLowerLeg": {"forward": -8.0},
+                "RightLowerLeg": {"forward": -8.0},
+                "Head": {"forward": -5.0},
+                "Spine": {"forward": 5.0},
+            },
+        ),
+        "wave": (
+            "手を振る",
+            {
+                # 挙げた手は手のひらを前に向けたままにする(ねじり無し)
+                "LeftUpperArm": {"down": -25.0},
+                "LeftLowerArm": {"forward": 40.0, "twist": -20.0},
+                "RightUpperArm": {"down": arm_down, "twist": twist},
+                "RightLowerArm": {"down": forearm},
+                "Head": {"twist": 15.0},
+            },
+        ),
+    }
 
 
-def presets() -> dict[str, dict[str, Any]]:
-    """ポーズプリセットを {name: {label, pose}} で返す(pose はオイラー角・度)。"""
+def presets(arm_down: float | None = None) -> dict[str, dict[str, Any]]:
+    """ポーズプリセットを {name: {label, pose}} で返す(pose はオイラー角・度)。
+
+    `arm_down` は腕の開き(既定は `STANDING_ARM_DOWN`)。体型によって変えたいので
+    ジョブごとに指定できる。
+    """
+    intents = _pose_intents(STANDING_ARM_DOWN if arm_down is None else float(arm_down))
     return {
         name: {
             "label": label,
             "pose": {bone: list(bone_euler(bone, **intent)) for bone, intent in bones.items()},
         }
-        for name, (label, bones) in _POSE_INTENTS.items()
+        for name, (label, bones) in intents.items()
     }
 
 

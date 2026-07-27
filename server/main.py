@@ -59,6 +59,7 @@ def _parse_params(params_json: Optional[str]) -> RigParams:
     up_axis = data.get("up_axis", "auto")
     facing = data.get("facing", "auto")
     bone_set = data.get("bone_set", "standard")
+    arm_down = data.get("arm_down", pose.STANDING_ARM_DOWN)
     preview = data.get("preview", config.DEFAULT_PREVIEW)
     export_vrm = data.get("vrm", config.DEFAULT_VRM)
     vrm_meta = data.get("vrm_meta", {})
@@ -76,6 +77,10 @@ def _parse_params(params_json: Optional[str]) -> RigParams:
         raise HTTPException(
             status_code=400,
             detail=f"facingは{sorted(config.ALLOWED_FACING)}のいずれかである必要があります。",
+        )
+    if not isinstance(arm_down, (int, float)) or not (0 <= arm_down <= 90):
+        raise HTTPException(
+            status_code=400, detail="arm_downは0〜90の数値である必要があります(90=体に密着)。"
         )
     if bone_set not in config.ALLOWED_BONE_SETS:
         raise HTTPException(
@@ -101,6 +106,7 @@ def _parse_params(params_json: Optional[str]) -> RigParams:
         up_axis=up_axis,
         facing=facing,
         bone_set=bone_set,
+        arm_down=float(arm_down),
         preview=bool(preview),
         vrm=bool(export_vrm),
         vrm_meta=vrm_meta,
@@ -122,6 +128,17 @@ async def _read_glb(model: UploadFile) -> bytes:
             detail="GLB(バイナリglTF)ではありません。image-3d の model.glb を指定してください。",
         )
     return data
+
+
+def _arm_down_for(job_id: Optional[str], arm_down: Optional[float]) -> Optional[float]:
+    """腕の開きを決める。明示指定 > ジョブの設定 > 既定。"""
+    if arm_down is not None:
+        return arm_down
+    if job_id:
+        job = job_manager.get_job(job_id)
+        if job is not None:
+            return job.params.get("arm_down")
+    return None
 
 
 def _require_job(job_id: str):
@@ -159,16 +176,19 @@ async def list_motions():
 
 
 @app.get("/api/poses")
-async def list_poses():
-    """ポーズプリセット。ボーンごとに軸の意味が違うため定義元はサーバに置く。"""
-    return pose.presets()
+async def list_poses(job: Optional[str] = None, arm_down: Optional[float] = None):
+    """ポーズプリセット。ボーンごとに軸の意味が違うため定義元はサーバに置く。
+
+    腕の開きはジョブごとに変えられるので、`job` か `arm_down` で指定できる。
+    """
+    return pose.presets(_arm_down_for(job, arm_down))
 
 
 @app.get("/api/motions/{name}")
-async def get_motion(name: str):
+async def get_motion(name: str, job: Optional[str] = None, arm_down: Optional[float] = None):
     """クリップのキーフレーム(ブラウザ再生用)。"""
     try:
-        return motions.get(name).to_dict()
+        return motions.get(name, _arm_down_for(job, arm_down)).to_dict()
     except KeyError as exc:
         raise HTTPException(
             status_code=404,
@@ -208,7 +228,7 @@ async def download_rig_job(job_id: str, format: str = "glb", motion: Optional[st
         )
 
     try:
-        clip = motions.get(motion)
+        clip = motions.get(motion, job.params.get("arm_down"))
     except KeyError as exc:
         raise HTTPException(
             status_code=404,

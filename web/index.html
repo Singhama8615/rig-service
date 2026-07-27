@@ -86,6 +86,9 @@
       <option value="+y">+Y</option>
     </select>
   </label>
+  <label title="腕を下ろしたときの肩の角度。90に近いほど腕が体に密着します。丸い体型ほど小さめに。">
+    腕の開き <input type="number" id="armDown" value="58" min="0" max="90" step="1">°
+  </label>
   <button type="submit">リグ化</button>
 </form>
 
@@ -153,6 +156,7 @@ $("form").addEventListener("submit", async (ev) => {
     height_m: Number($("height").value),
     up_axis: $("upAxis").value,
     facing: $("facing").value,
+    arm_down: Number($("armDown").value),
   }));
   const res = await fetch("/api/rig", { method: "POST", body });
   if (!res.ok) {
@@ -178,10 +182,23 @@ async function showPreview(job) {
   select.replaceChildren(
     ...boneNames.map((name) => new Option(name, name)),
   );
+  await refreshPosePresets(job.job_id);
   $("pose-preset").value = "tpose";
   $("motion-select").value = "";
   stopMotion();
   syncSlidersToSelectedBone();
+}
+
+async function refreshPosePresets(jobId) {
+  // 腕の開きはジョブごとの設定なので、そのジョブの値で組んだプリセットを使う
+  try {
+    const presets = await loadPosePresets(jobId);
+    $("pose-preset").replaceChildren(
+      ...Object.entries(presets).map(([name, entry]) => new Option(entry.label, name)),
+    );
+  } catch (err) {
+    console.error(err);
+  }
 }
 
 // --- モーション再生 (計画書 §7 R3-2) ----------------------------------------
@@ -208,7 +225,9 @@ function stopMotion() {
 $("motion-select").addEventListener("change", async (ev) => {
   const name = ev.target.value;
   if (!name) { stopMotion(); return; }
-  currentMotion = await (await fetch(`/api/motions/${name}`)).json();
+  // 腕の開きはジョブごとの設定なので job を渡す
+  const query = previewJobId ? `?job=${previewJobId}` : "";
+  currentMotion = await (await fetch(`/api/motions/${name}${query}`)).json();
   // モーションとポーズは排他(どちらもボーン回転を上書きするため)
   currentPose = {};
   $("pose-preset").value = "tpose";
@@ -406,18 +425,7 @@ async function poll() {
 }
 
 // ポーズプリセットはサーバが定義元(ボーンごとに軸の意味が違うため)
-loadPosePresets()
-  .then((presets) => {
-    $("pose-preset").replaceChildren(
-      ...Object.entries(presets).map(([name, entry]) => {
-        const option = document.createElement("option");
-        option.value = name;
-        option.textContent = entry.label;
-        return option;
-      })
-    );
-  })
-  .catch((err) => console.error(err));
+refreshPosePresets();
 
 poll();
 </script>

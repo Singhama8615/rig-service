@@ -44,6 +44,10 @@ class RigParams:
     up_axis: str = "auto"
     facing: str = "auto"
     bone_set: str = "standard"
+    # 腕を下ろした立ち姿での肩の角度(度)。90 に近いほど腕が体に密着する。
+    # リグ自体には影響せず、ポーズプリセットと同梱モーションの立ち姿に効く
+    # (丸い体型ほど開けないと脇が体にめり込む)。
+    arm_down: float = 58.0
     preview: bool = True
     vrm: bool = True
     vrm_meta: dict = field(default_factory=dict)

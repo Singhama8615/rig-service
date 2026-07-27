@@ -19,8 +19,9 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
 // ずれる。定義元は server/pose.py で、`GET /api/poses` から取得する。
 export const POSE_PRESETS = { tpose: {} };
 
-export async function loadPosePresets() {
-  const res = await fetch("/api/poses");
+export async function loadPosePresets(jobId) {
+  // 腕の開きはジョブごとの設定なので、あればそのジョブの値で組んでもらう
+  const res = await fetch(jobId ? `/api/poses?job=${encodeURIComponent(jobId)}` : "/api/poses");
   if (!res.ok) throw new Error(`ポーズプリセットを取得できません (${res.status})`);
   const data = await res.json();
   for (const [name, entry] of Object.entries(data)) {

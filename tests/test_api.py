@@ -394,3 +394,68 @@ def test_download_with_unknown_motion(client):
     job = _completed(client)
     res = client.get(f"/api/rig/jobs/{job['job_id']}/download?format=glb&motion=moonwalk")
     assert res.status_code == 404
+
+
+# --- 腕の開き (arm_down) ------------------------------------------------------
+
+
+def test_rig_params_record_arm_down(client):
+    job = _completed(client, {"arm_down": 45})
+    assert job["params"]["arm_down"] == 45
+
+
+def test_rig_params_default_arm_down(client):
+    from server import pose
+
+    job = _completed(client)
+    assert job["params"]["arm_down"] == pose.STANDING_ARM_DOWN
+
+
+@pytest.mark.parametrize("value", [-1, 91, "wide"])
+def test_reject_out_of_range_arm_down(client, value):
+    res = client.post(
+        "/api/rig",
+        files={"model": ("m.glb", GLB_HEADER, "model/gltf-binary")},
+        data={"params": json.dumps({"arm_down": value})},
+    )
+    assert res.status_code == 400
+
+
+def test_poses_follow_the_jobs_arm_down(client):
+    """プリセットはそのジョブの腕の開きで組まれること。"""
+    narrow = _completed(client, {"arm_down": 80})
+    wide = _completed(client, {"arm_down": 40})
+
+    def shoulder(job_id):
+        res = client.get("/api/poses", params={"job": job_id})
+        assert res.status_code == 200
+        return res.json()["arms_down"]["pose"]["LeftUpperArm"][0]
+
+    # down が大きいほど体に密着する = ローカルX が より負
+    assert shoulder(narrow["job_id"]) < shoulder(wide["job_id"])
+
+
+def test_motion_follows_the_jobs_arm_down(client):
+    narrow = _completed(client, {"arm_down": 80})
+    wide = _completed(client, {"arm_down": 40})
+
+    def shoulder(job_id):
+        res = client.get("/api/motions/walk", params={"job": job_id})
+        assert res.status_code == 200
+        return res.json()["tracks"]["LeftUpperArm"][0]["rotation"]
+
+    assert shoulder(narrow["job_id"]) != shoulder(wide["job_id"])
+
+
+def test_explicit_arm_down_overrides_the_job(client):
+    job = _completed(client, {"arm_down": 80})
+    a = client.get("/api/poses", params={"job": job["job_id"]}).json()
+    b = client.get("/api/poses", params={"job": job["job_id"], "arm_down": 40}).json()
+    assert a["arms_down"]["pose"] != b["arms_down"]["pose"]
+
+
+def test_poses_without_a_job_use_the_default(client):
+    from server import pose
+
+    res = client.get("/api/poses")
+    assert res.json()["arms_down"]["pose"] == pose.presets()["arms_down"]["pose"]

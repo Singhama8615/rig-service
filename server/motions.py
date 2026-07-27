@@ -79,29 +79,42 @@ class Motion:
 # (腕を下ろしたつもりが前へ突き出す)。
 # 立ち姿の角度は `pose` 側を定義元にする(プリセットとクリップで姿勢が
 # 食い違わないように)。twist はレストで正面を向く手のひらを内へ向けるため。
-_BASE_INTENT: dict[str, dict[str, float]] = {
-    "LeftUpperArm": {"down": pose_module.STANDING_ARM_DOWN, "twist": pose_module.STANDING_ARM_TWIST},
-    "RightUpperArm": {"down": pose_module.STANDING_ARM_DOWN, "twist": pose_module.STANDING_ARM_TWIST},
-    "LeftLowerArm": {"down": pose_module.STANDING_FOREARM_DOWN, "forward": 10.0},
-    "RightLowerArm": {"down": pose_module.STANDING_FOREARM_DOWN, "forward": 10.0},
-}
-_BASE = {bone: bone_euler(bone, **intent) for bone, intent in _BASE_INTENT.items()}
 
 
-def _hold(bone: str, duration: float) -> list[Keyframe]:
-    """基準姿勢のまま動かないトラック。"""
-    return [(0.0, _BASE[bone]), (duration, _BASE[bone])]
+class _Standing:
+    """腕を下ろした立ち姿の基準。クリップはここからの相対で書く。
+
+    腕の開き(`arm_down`)は体型で変えたいのでジョブごとに指定できる
+    (丸い体型ほど開けないと脇が体にめり込む)。
+    """
+
+    def __init__(self, arm_down: float | None = None):
+        self.arm_down = (
+            pose_module.STANDING_ARM_DOWN if arm_down is None else float(arm_down)
+        )
+        twist = pose_module.STANDING_ARM_TWIST
+        forearm = pose_module.STANDING_FOREARM_DOWN
+        self.intent: dict[str, dict[str, float]] = {
+            "LeftUpperArm": {"down": self.arm_down, "twist": twist},
+            "RightUpperArm": {"down": self.arm_down, "twist": twist},
+            "LeftLowerArm": {"down": forearm, "forward": 10.0},
+            "RightLowerArm": {"down": forearm, "forward": 10.0},
+        }
+        self.pose = {b: bone_euler(b, **i) for b, i in self.intent.items()}
+
+    def hold(self, bone: str, duration: float) -> list[Keyframe]:
+        """基準姿勢のまま動かないトラック。"""
+        return [(0.0, self.pose[bone]), (duration, self.pose[bone])]
+
+    def offset(self, bone: str, **delta: float):
+        """基準姿勢に解剖学的なオフセットを足した角度。"""
+        intent = dict(self.intent[bone])
+        for key, value in delta.items():
+            intent[key] = intent.get(key, 0.0) + value
+        return bone_euler(bone, **intent)
 
 
-def _offset(bone: str, **delta: float):
-    """基準姿勢に解剖学的なオフセットを足した角度。"""
-    intent = dict(_BASE_INTENT[bone])
-    for key, value in delta.items():
-        intent[key] = intent.get(key, 0.0) + value
-    return bone_euler(bone, **intent)
-
-
-def _idle() -> Motion:
+def _idle(st: _Standing) -> Motion:
     """呼吸と微かな重心移動だけの待機。"""
     d = 4.0
     return Motion(
@@ -115,22 +128,22 @@ def _idle() -> Motion:
             "Head": [(0.0, (0, 0, 0)), (2.0, bone_euler("Head", forward=-2.0)), (d, (0, 0, 0))],
             # 呼吸に合わせて腕をわずかに開閉する
             "LeftUpperArm": [
-                (0.0, _BASE["LeftUpperArm"]),
-                (2.0, _offset("LeftUpperArm", down=-2.5)),
-                (d, _BASE["LeftUpperArm"]),
+                (0.0, st.pose["LeftUpperArm"]),
+                (2.0, st.offset("LeftUpperArm", down=-2.5)),
+                (d, st.pose["LeftUpperArm"]),
             ],
             "RightUpperArm": [
-                (0.0, _BASE["RightUpperArm"]),
-                (2.0, _offset("RightUpperArm", down=-2.5)),
-                (d, _BASE["RightUpperArm"]),
+                (0.0, st.pose["RightUpperArm"]),
+                (2.0, st.offset("RightUpperArm", down=-2.5)),
+                (d, st.pose["RightUpperArm"]),
             ],
-            "LeftLowerArm": _hold("LeftLowerArm", d),
-            "RightLowerArm": _hold("RightLowerArm", d),
+            "LeftLowerArm": st.hold("LeftLowerArm", d),
+            "RightLowerArm": st.hold("RightLowerArm", d),
         },
     )
 
 
-def _wave() -> Motion:
+def _wave(st: _Standing) -> Motion:
     """左手を挙げて振る。右腕は下ろしたまま。"""
     d = 2.4
     # 腕はほぼ真横〜やや上、前腕を前に出して左右に振る
@@ -144,23 +157,23 @@ def _wave() -> Motion:
         loop=True,
         tracks={
             "LeftUpperArm": [
-                (0.0, _BASE["LeftUpperArm"]),
+                (0.0, st.pose["LeftUpperArm"]),
                 (0.5, raised),
                 (2.0, raised),
-                (d, _BASE["LeftUpperArm"]),
+                (d, st.pose["LeftUpperArm"]),
             ],
             "LeftLowerArm": [
-                (0.0, _BASE["LeftLowerArm"]),
+                (0.0, st.pose["LeftLowerArm"]),
                 (0.5, forearm_out),
                 (0.8, forearm_in),
                 (1.1, forearm_out),
                 (1.4, forearm_in),
                 (1.7, forearm_out),
                 (2.0, forearm_in),
-                (d, _BASE["LeftLowerArm"]),
+                (d, st.pose["LeftLowerArm"]),
             ],
-            "RightUpperArm": _hold("RightUpperArm", d),
-            "RightLowerArm": _hold("RightLowerArm", d),
+            "RightUpperArm": st.hold("RightUpperArm", d),
+            "RightLowerArm": st.hold("RightLowerArm", d),
             "Head": [
                 (0.0, (0, 0, 0)),
                 (0.6, bone_euler("Head", twist=12.0)),
@@ -177,7 +190,7 @@ def _bend(bone: str, degrees: float, duration: float) -> list[Keyframe]:
     return [(0.0, (0, 0, 0)), (0.8, forward), (1.8, forward), (duration, (0, 0, 0))]
 
 
-def _bow() -> Motion:
+def _bow(st: _Standing) -> Motion:
     """お辞儀して戻る。"""
     d = 3.0
     return Motion(
@@ -191,24 +204,24 @@ def _bow() -> Motion:
             "Head": _bend("Head", 12.0, d),
             # 上体を倒すぶん、腕は体から離れないよう後ろへ送る
             "LeftUpperArm": [
-                (0.0, _BASE["LeftUpperArm"]),
-                (0.8, _offset("LeftUpperArm", forward=-18.0)),
-                (1.8, _offset("LeftUpperArm", forward=-18.0)),
-                (d, _BASE["LeftUpperArm"]),
+                (0.0, st.pose["LeftUpperArm"]),
+                (0.8, st.offset("LeftUpperArm", forward=-18.0)),
+                (1.8, st.offset("LeftUpperArm", forward=-18.0)),
+                (d, st.pose["LeftUpperArm"]),
             ],
             "RightUpperArm": [
-                (0.0, _BASE["RightUpperArm"]),
-                (0.8, _offset("RightUpperArm", forward=-18.0)),
-                (1.8, _offset("RightUpperArm", forward=-18.0)),
-                (d, _BASE["RightUpperArm"]),
+                (0.0, st.pose["RightUpperArm"]),
+                (0.8, st.offset("RightUpperArm", forward=-18.0)),
+                (1.8, st.offset("RightUpperArm", forward=-18.0)),
+                (d, st.pose["RightUpperArm"]),
             ],
-            "LeftLowerArm": _hold("LeftLowerArm", d),
-            "RightLowerArm": _hold("RightLowerArm", d),
+            "LeftLowerArm": st.hold("LeftLowerArm", d),
+            "RightLowerArm": st.hold("RightLowerArm", d),
         },
     )
 
 
-def _walk() -> Motion:
+def _walk(st: _Standing) -> Motion:
     """その場歩き。ヒップの上下移動(ルートモーション)は持たない。"""
     d = 1.0
     half = d / 2
@@ -236,9 +249,9 @@ def _walk() -> Motion:
         """同じ側の脚と**逆位相**に振る(引数は脚側の位相を渡す)。"""
         a, b = (-22.0, 22.0) if leg_swings_first else (22.0, -22.0)
         return [
-            (0.0, _offset(bone, forward=a)),
-            (half, _offset(bone, forward=b)),
-            (d, _offset(bone, forward=a)),
+            (0.0, st.offset(bone, forward=a)),
+            (half, st.offset(bone, forward=b)),
+            (d, st.offset(bone, forward=a)),
         ]
 
     return Motion(
@@ -254,8 +267,8 @@ def _walk() -> Motion:
             # 腕は同じ側の脚と逆位相(脚の位相をそのまま渡す)
             "LeftUpperArm": arm("LeftUpperArm", True),
             "RightUpperArm": arm("RightUpperArm", False),
-            "LeftLowerArm": _hold("LeftLowerArm", d),
-            "RightLowerArm": _hold("RightLowerArm", d),
+            "LeftLowerArm": st.hold("LeftLowerArm", d),
+            "RightLowerArm": st.hold("RightLowerArm", d),
             # 歩調に合わせて上体をわずかにひねる
             "Spine": [
                 (0.0, bone_euler("Spine", twist=-3.0)),
@@ -266,7 +279,7 @@ def _walk() -> Motion:
     )
 
 
-def _run() -> Motion:
+def _run(st: _Standing) -> Motion:
     """その場走り。歩きより速く、振りが大きく、肘を曲げて前傾する。
 
     歩きと同じくルートモーション(ヒップの前進・上下動)は持たない。クリップは
@@ -276,7 +289,7 @@ def _run() -> Motion:
     d = 0.6
     half = d / 2
     # 走りは肘を前に構えるぶん、立ち姿より少し閉じてよい
-    _RUN_ARM_DOWN = pose_module.STANDING_ARM_DOWN + 8.0
+    _RUN_ARM_DOWN = st.arm_down + 8.0
 
     def leg(side: str, swing_first: bool) -> tuple[list[Keyframe], list[Keyframe]]:
         a, b = (45.0, -35.0) if swing_first else (-35.0, 45.0)
@@ -343,15 +356,29 @@ def _run() -> Motion:
     )
 
 
-MOTIONS: dict[str, Motion] = {
-    m.name: m for m in (_idle(), _wave(), _bow(), _walk(), _run())
-}
+_BUILDERS = (_idle, _wave, _bow, _walk, _run)
 
 
-def get(name: str) -> Motion:
+def build(arm_down: float | None = None) -> dict[str, Motion]:
+    """全クリップを組み立てる。`arm_down` は腕の開き(既定は立ち姿の標準値)。
+
+    クリップは数値の生成だけで重い処理が無いので、ジョブごとの角度で
+    その都度組み直す(キャッシュしない)。
+    """
+    standing = _Standing(arm_down)
+    return {m.name: m for m in (builder(standing) for builder in _BUILDERS)}
+
+
+#: 既定の腕の開きで組んだクリップ。角度を指定しない呼び出し用。
+MOTIONS: dict[str, Motion] = build()
+
+
+def get(name: str, arm_down: float | None = None) -> Motion:
     if name not in MOTIONS:
         raise KeyError(name)
-    return MOTIONS[name]
+    if arm_down is None:
+        return MOTIONS[name]
+    return build(arm_down)[name]
 
 
 def validate_bones() -> list[str]:
